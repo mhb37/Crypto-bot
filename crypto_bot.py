@@ -2,7 +2,7 @@ import requests
 import time
 from datetime import datetime
 
-TELEGRAM_TOKEN = "TON_TOKEN"
+TELEGRAM_TOKEN = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
 CHECK_INTERVAL_MINUTES = 30
 
@@ -36,7 +36,8 @@ def calc_rsi(prices, period=14):
     return round(100 - 100 / (1 + ag / al), 2)
 
 def send_telegram(message):
-    url = f"https://api.telegram.org/bot{8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0}/sendMessage"
+    url = "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/sendMessage"
+
     try:
         r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message}, timeout=10)
         print(f"Telegram: {r.status_code}")
