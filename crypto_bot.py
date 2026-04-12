@@ -214,7 +214,7 @@ def run():
     print("🤖 Bot démarré — analyse toutes les", CHECK_INTERVAL_MINUTES, "minutes")
     send_telegram("🤖 <b>Crypto Signal Bot démarré !</b>\nSurveillance : BTC | XRP | ETH\n📊 Analyse toutes les " + str(CHECK_INTERVAL_MINUTES) + " minutes.")
     last_signals = {"BTC": None, "XRP": None, "ETH": None}
-        send_telegram("🔔 Test de connexion Telegram OK !")
+        
 
 
     while True:
