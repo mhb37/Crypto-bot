@@ -17,8 +17,8 @@ from datetime import datetime
 # ──────────────────────────────────────────────
 #  ⚙️  CONFIG — MODIFIE CES DEUX VALEURS
 # ──────────────────────────────────────────────
-TELEGRAM_TOKEN  = 8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0
-TELEGRAM_CHAT_ID = 6866451502
+TELEGRAM_TOKEN  = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
+TELEGRAM_CHAT_ID = "6866451502"
 
 CHECK_INTERVAL_MINUTES = 30
 # ──────────────────────────────────────────────
