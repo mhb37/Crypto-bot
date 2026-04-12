@@ -35,20 +35,29 @@ BINANCE_SYMBOLS = {
     "ETH": "ETHUSDT",
 }
 
+COINGECKO_IDS = {
+    "BTCUSDT": "bitcoin",
+    "XRPUSDT": "ripple",
+    "ETHUSDT": "ethereum",
+}
+
 def get_klines(symbol, interval="1h", limit=100):
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    cg_id = COINGECKO_IDS.get(symbol)
+    url = f"https://api.coingecko.com/api/v3/coins/{cg_id}/market_chart"
+    params = {"vs_currency": "usd", "days": "4", "interval": "hourly"}
     try:
         r = requests.get(url, params=params, timeout=10)
         data = r.json()
-        closes  = [float(c[4]) for c in data]
-        highs   = [float(c[2]) for c in data]
-        lows    = [float(c[3]) for c in data]
-        volumes = [float(c[5]) for c in data]
+        prices = [p[1] for p in data["prices"]]
+        closes = prices
+        highs  = prices
+        lows   = prices
+        volumes = [v[1] for v in data["total_volumes"]]
         return closes, highs, lows, volumes
     except Exception as e:
-        print(f"Erreur Binance {symbol}: {e}")
+        print(f"Erreur CoinGecko {symbol}: {e}")
         return None, None, None, None
+
 
 def ema(prices, period):
     k = 2 / (period + 1)
