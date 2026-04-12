@@ -329,4 +329,26 @@ def run():
         "================================\n"
         "Surveillance : BTC / XRP / ETH\n"
         "Intervalle   : " + str(CHECK_INTERVAL_MINUTES) + " min\n"
-        "Indicateurs  : RSI, MA​​​​​​​​​​​​​​​​
+        "Indicateurs  : RSI, MACD, EMA,\n"
+        "Bollinger, Stochastique\n"
+        "================================"
+    )
+    last_signals = {"BTC": None, "XRP": None, "ETH": None}
+    while True:
+        print("[" + datetime.now().strftime("%H:%M") + "] Analyse...")
+        for ticker in COINS:
+            signal = analyze(ticker)
+            if signal is None:
+                continue
+            print(ticker + ": " + signal["direction"] + " score=" + str(signal["score"]) + " RSI=" + str(signal["rsi"]))
+            if signal["force"] in ("FORT", "TRES FORT"):
+                key = signal["direction"] + signal["force"]
+                if key != last_signals[ticker]:
+                    send_telegram(format_message(signal))
+                    last_signals[ticker] = key
+                    time.sleep(2)
+        print("Prochain check dans " + str(CHECK_INTERVAL_MINUTES) + " min")
+        time.sleep(CHECK_INTERVAL_MINUTES * 60)
+
+if __name__ == "__main__":
+    run()
