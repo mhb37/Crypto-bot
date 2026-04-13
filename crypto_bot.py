@@ -13,8 +13,10 @@ RISQUE_PCT       = 2.0
 
 CHECK_INTERVAL_MINUTES = 30
 PAUSE_WEEKEND    = True
-HEURE_DEBUT      = 7
-HEURE_FIN        = 23
+HEURE_DEBUT      = 5   # 7h heure Paris (UTC+2)
+HEURE_FIN        = 21  # 23h heure Paris (UTC+2)
+
+HEURE
 # ═══════════════════════════════════════════
 
 COINS = {
