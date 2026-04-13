@@ -43,15 +43,23 @@ def is_heure_creuse():
 def get_prices(coin_id, days=7):
     url = "https://api.coingecko.com/api/v3/coins/" + coin_id + "/market_chart"
     params = {"vs_currency": "usd", "days": str(days), "interval": "hourly"}
-    try:
-        r = requests.get(url, params=params, timeout=15)
-        data = r.json()
-        prices  = [p[1] for p in data["prices"]]
-        volumes = [v[1] for v in data["total_volumes"]]
-        return prices, volumes
-    except Exception as e:
-        print("Erreur " + coin_id + ": " + str(e))
-        return None, None
+    for tentative in range(3):
+        try:
+            time.sleep(15)
+            r = requests.get(url, params=params, timeout=15)
+            data = r.json()
+            if "prices" not in data:
+                print("CoinGecko rate limit " + coin_id + " tentative " + str(tentative+1))
+                time.sleep(60)
+                continue
+            prices  = [p[1] for p in data["prices"]]
+            volumes = [v[1] for v in data["total_volumes"]]
+            return prices, volumes
+        except Exception as e:
+            print("Erreur " + coin_id + ": " + str(e))
+            time.sleep(30)
+    return None, None
+
 
 def get_current(coin_id):
     url = "https://api.coingecko.com/api/v3/simple/price"
