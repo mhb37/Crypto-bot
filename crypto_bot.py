@@ -13,11 +13,8 @@ RISQUE_PCT       = 2.0
 
 CHECK_INTERVAL_MINUTES = 30
 PAUSE_WEEKEND    = True
-HEURE_DEBUT = 6    # 6h UTC = 7h Paris
-HEURE_FIN   = 22   # 22h UTC = 23h Paris
-
-
-HEURE
+HEURE_DEBUT      = 5    # 5h UTC = 7h Paris
+HEURE_FIN        = 21   # 21h UTC = 23h Paris
 # ═══════════════════════════════════════════
 
 COINS = {
@@ -40,7 +37,7 @@ def is_weekend():
     return datetime.now().weekday() >= 5
 
 def is_heure_creuse():
-    h = datetime.now().hour
+    h = datetime.utcnow().hour
     return h < HEURE_DEBUT or h >= HEURE_FIN
 
 def get_prices(coin_id, days=7):
@@ -62,7 +59,6 @@ def get_prices(coin_id, days=7):
             print("Erreur " + coin_id + ": " + str(e))
             time.sleep(30)
     return None, None
-
 
 def get_current(coin_id):
     url = "https://api.coingecko.com/api/v3/simple/price"
@@ -338,7 +334,7 @@ def tf_label(score):
     else:             return "RANGE "
 
 def format_signal(s):
-    now  = datetime.now().strftime("%d/%m %H:%M")
+    now  = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
     sign = "+" if s["change"] >= 0 else ""
     h    = s["tf1h"]
     top  = (
@@ -426,7 +422,7 @@ def format_signal(s):
     return msg
 
 def format_range_alert(ticker, adx, price):
-    now = datetime.now().strftime("%d/%m %H:%M")
+    now = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
     return (
         "================================\n"
         "  ALERTE MARCHE EN RANGE\n"
@@ -442,7 +438,7 @@ def format_range_alert(ticker, adx, price):
     )
 
 def format_recap(signaux):
-    now = datetime.now().strftime("%d/%m %H:%M")
+    now = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
     msg = (
         "================================\n"
         "  RECAP DU JOUR\n"
@@ -472,7 +468,7 @@ def run():
         "Risque/t   : " + str(RISQUE_PCT) + "% du capital\n"
         "Levier     : x" + str(LEVIER) + "\n"
         "Pause WE   : OUI\n"
-        "Filtre     : 7h - 23h\n"
+        "Filtre     : 7h - 23h (Paris)\n"
         "================================"
     )
     last_signals     = {"BTC": None, "XRP": None, "ETH": None}
@@ -482,9 +478,9 @@ def run():
     last_recap_day   = -1
 
     while True:
-        now = datetime.now()
+        now = datetime.utcnow()
 
-        if now.hour == 20 and now.day != last_recap_day:
+        if now.hour == 18 and now.day != last_recap_day:  # 18h UTC = 20h Paris
             send_telegram(format_recap(signaux_du_jour))
             signaux_du_jour = []
             last_recap_day  = now.day
@@ -505,11 +501,11 @@ def run():
             weekend_notified = False
 
         if is_heure_creuse():
-            print("[" + now.strftime("%H:%M") + "] Heure creuse — pause")
+            print("[" + now.strftime("%H:%M") + " UTC] Heure creuse — pause")
             time.sleep(CHECK_INTERVAL_MINUTES * 60)
             continue
 
-        print("[" + now.strftime("%H:%M") + "] Analyse en cours...")
+        print("[" + now.strftime("%H:%M") + " UTC] Analyse en cours...")
 
         for ticker in COINS:
             signal = analyze(ticker)
