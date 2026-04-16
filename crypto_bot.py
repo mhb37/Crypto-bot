@@ -8,13 +8,24 @@ from datetime import datetime
 TELEGRAM_TOKEN   = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
 
+BUDGET           = 100
 LEVIER           = 5
 RISQUE_PCT       = 2.0
 
+ALLOC = {
+    "TRES FORT": 10,
+    "FORT":       5,
+    "FAIBLE":     0,
+}
+
 CHECK_INTERVAL_MINUTES = 30
-PAUSE_WEEKEND    = True
-HEURE_DEBUT      = 5    # 5h UTC = 7h Paris
-HEURE_FIN        = 21   # 21h UTC = 23h Paris
+CHECK_MOUVEMENT_SEC    = 300   # 5 minutes
+PAUSE_WEEKEND          = True
+HEURE_DEBUT            = 5     # 5h UTC = 7h Paris
+HEURE_FIN              = 21    # 21h UTC = 23h Paris
+
+SEUIL_1H = 2.0   # Alerte si +/- 2% en 1h
+SEUIL_4H = 5.0   # Alerte si +/- 5% en 4h
 # ═══════════════════════════════════════════
 
 COINS = {
@@ -23,6 +34,9 @@ COINS = {
     "ETH": "ethereum",
 }
 
+# ───────────────────────────────────────────
+#  TELEGRAM
+# ───────────────────────────────────────────
 def send_telegram(message):
     url = "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/sendMessage"
     try:
@@ -33,13 +47,19 @@ def send_telegram(message):
         print("Erreur Telegram: " + str(e))
         return False
 
+# ───────────────────────────────────────────
+#  FILTRES
+# ───────────────────────────────────────────
 def is_weekend():
-    return datetime.now().weekday() >= 5
+    return datetime.utcnow().weekday() >= 5
 
 def is_heure_creuse():
     h = datetime.utcnow().hour
     return h < HEURE_DEBUT or h >= HEURE_FIN
 
+# ───────────────────────────────────────────
+#  DONNEES
+# ───────────────────────────────────────────
 def get_prices(coin_id, days=7):
     url = "https://api.coingecko.com/api/v3/coins/" + coin_id + "/market_chart"
     params = {"vs_currency": "usd", "days": str(days), "interval": "hourly"}
@@ -49,7 +69,7 @@ def get_prices(coin_id, days=7):
             r = requests.get(url, params=params, timeout=15)
             data = r.json()
             if "prices" not in data:
-                print("CoinGecko rate limit " + coin_id + " tentative " + str(tentative+1))
+                print("Rate limit " + coin_id + " tentative " + str(tentative+1))
                 time.sleep(60)
                 continue
             prices  = [p[1] for p in data["prices"]]
@@ -70,57 +90,57 @@ def get_current(coin_id):
     except:
         return None, None
 
-def check_mouvement_brusque(coin_id, ticker, seuil_1h=2.0, seuil_4h=5.0):
-    """Detecte les mouvements brusques de prix."""
+# ───────────────────────────────────────────
+#  SURVEILLANCE MOUVEMENTS BRUSQUES
+# ───────────────────────────────────────────
+def check_mouvement_brusque(coin_id, ticker):
     prices, _ = get_prices(coin_id, days=1)
     if not prices or len(prices) < 5:
         return None
     price_now = prices[-1]
-    price_1h  = prices[-2]  if len(prices) >= 2  else price_now
-    price_4h  = prices[-5]  if len(prices) >= 5  else price_now
+    price_1h  = prices[-2] if len(prices) >= 2 else price_now
+    price_4h  = prices[-5] if len(prices) >= 5 else price_now
     var_1h = round((price_now - price_1h) / price_1h * 100, 2)
     var_4h = round((price_now - price_4h) / price_4h * 100, 2)
     alertes = []
-    if abs(var_1h) >= seuil_1h:
-        direction = "HAUSSE" if var_1h > 0 else "BAISSE"
-        alertes.append(("1H", var_1h, direction))
-    if abs(var_4h) >= seuil_4h:
-        direction = "HAUSSE" if var_4h > 0 else "BAISSE"
-        alertes.append(("4H", var_4h, direction))
+    if abs(var_1h) >= SEUIL_1H:
+        alertes.append(("1H", var_1h, "HAUSSE" if var_1h > 0 else "BAISSE"))
+    if abs(var_4h) >= SEUIL_4H:
+        alertes.append(("4H", var_4h, "HAUSSE" if var_4h > 0 else "BAISSE"))
     if not alertes:
         return None
     return {
-        "ticker":    ticker,
-        "price":     price_now,
-        "var_1h":    var_1h,
-        "var_4h":    var_4h,
-        "alertes":   alertes,
+        "ticker":  ticker,
+        "price":   price_now,
+        "var_1h":  var_1h,
+        "var_4h":  var_4h,
+        "alertes": alertes,
     }
 
 def format_mouvement(m):
-    now  = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
-    sign_1h = "+" if m["var_1h"] >= 0 else ""
-    sign_4h = "+" if m["var_4h"] >= 0 else ""
-    emoji_1h = "HAUSSE" if m["var_1h"] >= 0 else "BAISSE"
-    emoji_4h = "HAUSSE" if m["var_4h"] >= 0 else "BAISSE"
+    now     = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
+    s1h     = "+" if m["var_1h"] >= 0 else ""
+    s4h     = "+" if m["var_4h"] >= 0 else ""
+    e1h     = "HAUSSE" if m["var_1h"] >= 0 else "BAISSE"
+    e4h     = "HAUSSE" if m["var_4h"] >= 0 else "BAISSE"
     msg = (
         "================================\n"
         "  MOUVEMENT BRUSQUE DETECTE\n"
         "================================\n"
         "" + m["ticker"] + "/USDT   " + now + "\n"
-        "Prix : " + str(m["price"]) + " USD\n"
+        "Prix : " + str(round(m["price"], 2)) + " USD\n"
         "\n"
-        "1H : " + emoji_1h + " " + sign_1h + str(m["var_1h"]) + "%\n"
-        "4H : " + emoji_4h + " " + sign_4h + str(m["var_4h"]) + "%\n"
+        "1H : " + e1h + "  " + s1h + str(m["var_1h"]) + "%\n"
+        "4H : " + e4h + "  " + s4h + str(m["var_4h"]) + "%\n"
         "\n"
     )
     for periode, var, direction in m["alertes"]:
         if abs(var) >= 8:
-            msg += "ALERTE EXTREME sur " + periode + " !\n"
-            msg += "Verifier les news immediatement.\n"
+            msg += "ALERTE EXTREME " + periode + " !\n"
+            msg += "Verifier les news maintenant.\n"
         elif abs(var) >= 5:
             msg += "Mouvement fort sur " + periode + ".\n"
-            msg += "Opportunite ou risque a surveiller.\n"
+            msg += "Opportunite ou risque majeur.\n"
         else:
             msg += "Mouvement notable sur " + periode + ".\n"
     msg += (
@@ -131,7 +151,9 @@ def format_mouvement(m):
     )
     return msg
 
-
+# ───────────────────────────────────────────
+#  INDICATEURS
+# ───────────────────────────────────────────
 def ema(prices, period):
     k = 2.0 / (period + 1)
     v = prices[0]
@@ -217,19 +239,16 @@ def calc_rsi_divergence(prices):
         return None
     rsi_recent = calc_rsi(prices[-20:])
     rsi_old    = calc_rsi(prices[-40:-20])
-    price_now  = prices[-1]
-    price_old  = prices[-21]
-    if price_now < price_old and rsi_recent > rsi_old + 5:
+    if prices[-1] < prices[-21] and rsi_recent > rsi_old + 5:
         return "HAUSSIERE"
-    if price_now > price_old and rsi_recent < rsi_old - 5:
+    if prices[-1] > prices[-21] and rsi_recent < rsi_old - 5:
         return "BAISSIERE"
     return None
 
 def calc_fibonacci(prices, lookback=50):
     recent = prices[-lookback:]
-    high   = max(recent)
-    low    = min(recent)
-    diff   = high - low
+    high, low = max(recent), min(recent)
+    diff = high - low
     return {
         "0.236": round(high - diff * 0.236, 4),
         "0.382": round(high - diff * 0.382, 4),
@@ -242,10 +261,8 @@ def calc_volume_trend(volumes):
         return "stable"
     ar = sum(volumes[-5:]) / 5
     ao = sum(volumes[-10:-5]) / 5
-    if ar > ao * 1.2:
-        return "en hausse"
-    if ar < ao * 0.8:
-        return "en baisse"
+    if ar > ao * 1.2: return "en hausse"
+    if ar < ao * 0.8: return "en baisse"
     return "stable"
 
 def detect_pattern(prices):
@@ -266,6 +283,21 @@ def support_resistance(prices, lookback=24):
     recent = prices[-lookback:]
     return round(min(recent), 4), round(max(recent), 4)
 
+def calc_allocation(force, confiance):
+    pct = ALLOC.get(force, 0)
+    if pct == 0:
+        return 0, 0
+    if confiance >= 80:
+        pct = min(pct * 1.5, 15)
+    elif confiance < 60:
+        pct = pct * 0.7
+    pct     = round(pct, 1)
+    montant = round(BUDGET * pct / 100, 2)
+    return pct, montant
+
+# ───────────────────────────────────────────
+#  ANALYSE
+# ───────────────────────────────────────────
 def analyze_tf(prices, volumes):
     if not prices or len(prices) < 50:
         return None
@@ -280,24 +312,24 @@ def analyze_tf(prices, volumes):
     e20                = ema(prices, 20)[-1]
     e50                = ema(prices, 50)[-1]
     score = 0
-    if rsi < 25:   score += 3
-    elif rsi < 35: score += 2
-    elif rsi < 45: score += 1
-    elif rsi > 75: score -= 3
-    elif rsi > 65: score -= 2
-    elif rsi > 55: score -= 1
-    if hist > 0 and mv > sv:   score += 2
-    elif hist > 0:              score += 1
-    elif hist < 0 and mv < sv: score -= 2
-    elif hist < 0:              score -= 1
-    if e20 > e50:   score += 1
-    elif e20 < e50: score -= 1
+    if rsi < 25:         score += 3
+    elif rsi < 35:       score += 2
+    elif rsi < 45:       score += 1
+    elif rsi > 75:       score -= 3
+    elif rsi > 65:       score -= 2
+    elif rsi > 55:       score -= 1
+    if hist > 0 and mv > sv:    score += 2
+    elif hist > 0:               score += 1
+    elif hist < 0 and mv < sv:  score -= 2
+    elif hist < 0:               score -= 1
+    if e20 > e50:        score += 1
+    elif e20 < e50:      score -= 1
     if price < bbl:      score += 2
     elif price < bb_mid: score += 1
     elif price > bb_up:  score -= 2
     elif price > bb_mid: score -= 1
-    if stoch < 20:   score += 2
-    elif stoch > 80: score -= 2
+    if stoch < 20:       score += 2
+    elif stoch > 80:     score -= 2
     if abs(price - sup) / price < 0.015: score += 2
     if abs(price - res) / price < 0.015: score -= 2
     if vol == "en hausse" and score > 0: score += 1
@@ -329,16 +361,16 @@ def analyze(ticker):
     s4h = tf4h["score"] if tf4h else 0
     s1d = tf1d["score"] if tf1d else 0
     score_global = round(s1d * 0.40 + s4h * 0.35 + s1h * 0.25, 1)
-    confluence = (s1h > 0 and s4h > 0 and s1d > 0) or (s1h < 0 and s4h < 0 and s1d < 0)
-    adx = tf1h["adx"]
-    tendance = adx >= 20
-    divergence = calc_rsi_divergence(p1h)
+    confluence   = (s1h > 0 and s4h > 0 and s1d > 0) or (s1h < 0 and s4h < 0 and s1d < 0)
+    adx          = tf1h["adx"]
+    tendance     = adx >= 20
+    divergence   = calc_rsi_divergence(p1h)
     if divergence == "HAUSSIERE" and score_global > 0:
         score_global = round(score_global + 1, 1)
     elif divergence == "BAISSIERE" and score_global < 0:
         score_global = round(score_global - 1, 1)
-    pattern = detect_pattern(p1h)
-    fibs    = calc_fibonacci(p1h)
+    pattern   = detect_pattern(p1h)
+    fibs      = calc_fibonacci(p1h)
     confiance = min(100, int(abs(score_global) / 8 * 100))
     if not confluence: confiance = int(confiance * 0.6)
     if not tendance:   confiance = int(confiance * 0.7)
@@ -374,6 +406,7 @@ def analyze(ticker):
         rr  = round((price - tp2) / (sl - price), 1) if price != sl else 0
     else:
         sl = tp1 = tp2 = rr = None
+    alloc_pct, alloc_usd = calc_allocation(force, confiance)
     return {
         "ticker": ticker, "price": price, "change": change,
         "direction": direction, "force": force,
@@ -383,8 +416,12 @@ def analyze(ticker):
         "tf1h": tf1h, "tf4h": tf4h, "tf1d": tf1d,
         "s1h": s1h, "s4h": s4h, "s1d": s1d,
         "sl": sl, "tp1": tp1, "tp2": tp2, "rr": rr,
+        "alloc_pct": alloc_pct, "alloc_usd": alloc_usd,
     }
 
+# ───────────────────────────────────────────
+#  FORMATAGE
+# ───────────────────────────────────────────
 def pbar(v, lo=0, hi=100, n=8):
     pct = max(0, min(1, (v - lo) / (hi - lo) if hi != lo else 0.5))
     f = int(pct * n)
@@ -399,19 +436,15 @@ def format_signal(s):
     now  = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
     sign = "+" if s["change"] >= 0 else ""
     h    = s["tf1h"]
-    top  = (
+    msg  = (
         "================================\n"
         "  " + s["direction"] + " " + s["force"] + "\n"
         "================================\n"
-    )
-    conf_bar = pbar(s["confiance"], 0, 100, 10)
-    msg = top
-    msg += (
-        s["ticker"] + "/USDT   " + now + "\n"
+        "" + s["ticker"] + "/USDT   " + now + "\n"
         "Prix  : " + str(s["price"]) + " USD\n"
         "24h   : " + sign + str(s["change"]) + "%\n"
         "\n"
-        "Confiance  " + conf_bar + " " + str(s["confiance"]) + "%\n"
+        "Confiance  " + pbar(s["confiance"], 0, 100, 10) + " " + str(s["confiance"]) + "%\n"
         "Confluence : " + ("OUI" if s["confluence"] else "NON") + "\n"
         "ADX        : " + str(s["adx"]) + " (" + ("Fort" if s["adx"] >= 25 else "Moyen" if s["adx"] >= 20 else "Faible") + ")\n"
     )
@@ -430,7 +463,17 @@ def format_signal(s):
             "TP2    : " + str(s["tp2"]) + "\n"
             "SL     : " + str(s["sl"]) + "\n"
             "R/R    : 1:" + str(s["rr"]) + "\n"
-            "Risque : " + str(RISQUE_PCT) + "% de ton capital\n"
+        )
+    if s["alloc_pct"] > 0:
+        msg += (
+            "\n"
+            "--------------------------------\n"
+            " GESTION DU CAPITAL\n"
+            "--------------------------------\n"
+            "Investir  : " + str(s["alloc_pct"]) + "% du capital\n"
+            "Soit      : " + str(s["alloc_usd"]) + " USD\n"
+            "Levier    : x" + str(LEVIER) + "\n"
+            "Risque max: " + str(RISQUE_PCT) + "% du capital\n"
         )
     msg += (
         "\n"
@@ -460,16 +503,16 @@ def format_signal(s):
             "Resistance : " + str(h["res"]) + "\n"
         )
     if s["fibs"]:
-        fibs = s["fibs"]
+        f = s["fibs"]
         msg += (
             "\n"
             "--------------------------------\n"
             " FIBONACCI\n"
             "--------------------------------\n"
-            "0.236 : " + str(fibs["0.236"]) + "\n"
-            "0.382 : " + str(fibs["0.382"]) + "\n"
-            "0.500 : " + str(fibs["0.500"]) + "\n"
-            "0.618 : " + str(fibs["0.618"]) + "\n"
+            "0.236 : " + str(f["0.236"]) + "\n"
+            "0.382 : " + str(f["0.382"]) + "\n"
+            "0.500 : " + str(f["0.500"]) + "\n"
+            "0.618 : " + str(f["0.618"]) + "\n"
         )
     if not s["confluence"]:
         msg += "\n! Timeframes non alignes\n  Signal moins fiable\n"
@@ -490,7 +533,7 @@ def format_range_alert(ticker, adx, price):
         "  ALERTE MARCHE EN RANGE\n"
         "================================\n"
         "" + ticker + "/USDT   " + now + "\n"
-        "Prix : " + str(price) + " USD\n"
+        "Prix : " + str(round(price, 2)) + " USD\n"
         "ADX  : " + str(adx) + " (trop faible)\n"
         "\n"
         "Marche sans tendance detecte.\n"
@@ -515,41 +558,48 @@ def format_recap(signaux):
     msg += "================================"
     return msg
 
+# ───────────────────────────────────────────
+#  BOUCLE PRINCIPALE
+# ───────────────────────────────────────────
 def run():
-    print("Bot V3 demarre")
+    print("Bot V4 demarre")
     send_telegram(
         "================================\n"
-        "  CRYPTO SIGNAL BOT V3\n"
+        "  CRYPTO SIGNAL BOT V4\n"
         "================================\n"
         "Paires     : BTC / XRP / ETH\n"
         "Timeframes : 1H + 4H + 1D\n"
         "Indicateurs: RSI, MACD, EMA,\n"
         "  Bollinger, Stoch, ADX,\n"
         "  Divergences, Fibonacci,\n"
-        "  Patterns de bougies\n"
-        "Risque/t   : " + str(RISQUE_PCT) + "% du capital\n"
+        "  Patterns, Mouvements brusques\n"
+        "Budget     : " + str(BUDGET) + " USD\n"
         "Levier     : x" + str(LEVIER) + "\n"
         "Pause WE   : OUI\n"
-        "Filtre     : 7h - 23h (Paris)\n"
+        "Filtre     : 7h - 23h Paris\n"
+        "Alerte mvt : toutes les 5 min\n"
         "================================"
     )
+
     last_signals     = {"BTC": None, "XRP": None, "ETH": None}
     range_alerted    = {"BTC": False, "XRP": False, "ETH": False}
+    last_mouvement   = {"BTC": "0", "XRP": "0", "ETH": "0"}
     weekend_notified = False
     signaux_du_jour  = []
     last_recap_day   = -1
-    last_mouvement   = {"BTC": 0, "XRP": 0, "ETH": 0}
-last_check_mvt   = 0
-
+    last_check_mvt   = 0
+    last_check_main  = 0
 
     while True:
         now = datetime.utcnow()
 
-        if now.hour == 18 and now.day != last_recap_day:  # 18h UTC = 20h Paris
+        # Recap quotidien 18h UTC = 20h Paris
+        if now.hour == 18 and now.day != last_recap_day:
             send_telegram(format_recap(signaux_du_jour))
             signaux_du_jour = []
             last_recap_day  = now.day
 
+        # Pause weekend
         if PAUSE_WEEKEND and is_weekend():
             if not weekend_notified:
                 send_telegram(
@@ -564,53 +614,58 @@ last_check_mvt   = 0
             continue
         else:
             weekend_notified = False
-        # Check mouvements brusques toutes les 5 minutes
-        if time.time() - last_check_mvt >= 300:
+
+        # ── CHECK MOUVEMENTS BRUSQUES (toutes les 5 min) ──
+        if time.time() - last_check_mvt >= CHECK_MOUVEMENT_SEC:
             last_check_mvt = time.time()
-            for ticker in COINS:
-                mvt = check_mouvement_brusque(COINS[ticker], ticker)
-                if mvt:
-                    key = str(int(abs(mvt["var_1h"]))) + str(int(abs(mvt["var_4h"])))
-                    if key != last_mouvement[ticker]:
-                        send_telegram(format_mouvement(mvt))
-                        last_mouvement[ticker] = key
+            if not is_heure_creuse():
+                print("[" + now.strftime("%H:%M") + " UTC] Check mouvements...")
+                for ticker in COINS:
+                    mvt = check_mouvement_brusque(COINS[ticker], ticker)
+                    if mvt:
+                        key = str(int(abs(mvt["var_1h"]))) + str(int(abs(mvt["var_4h"])))
+                        if key != last_mouvement[ticker]:
+                            send_telegram(format_mouvement(mvt))
+                            last_mouvement[ticker] = key
+                            time.sleep(2)
+
+        # ── ANALYSE TECHNIQUE PRINCIPALE (toutes les 30 min) ──
+        if time.time() - last_check_main >= CHECK_INTERVAL_MINUTES * 60:
+            last_check_main = time.time()
+
+            if is_heure_creuse():
+                print("[" + now.strftime("%H:%M") + " UTC] Heure creuse — pause")
+            else:
+                print("[" + now.strftime("%H:%M") + " UTC] Analyse technique...")
+                for ticker in COINS:
+                    signal = analyze(ticker)
+                    if signal is None:
+                        print(ticker + ": erreur donnees")
+                        continue
+                    print(ticker + ": " + signal["direction"] + " " + signal["force"] + " conf=" + str(signal["confiance"]) + "% ADX=" + str(signal["adx"]))
+
+                    if signal["adx"] < 15 and not range_alerted[ticker]:
+                        send_telegram(format_range_alert(ticker, signal["adx"], signal["price"]))
+                        range_alerted[ticker] = True
                         time.sleep(2)
+                        continue
+                    elif signal["adx"] >= 15:
+                        range_alerted[ticker] = False
 
-        if is_heure_creuse():
-            print("[" + now.strftime("%H:%M") + " UTC] Heure creuse — pause")
-            time.sleep(CHECK_INTERVAL_MINUTES * 60)
-            continue
+                    if signal["force"] in ("FORT", "TRES FORT") and signal["confiance"] >= 50:
+                        key = signal["direction"] + signal["force"] + str(int(signal["confiance"] / 10))
+                        if key != last_signals[ticker]:
+                            send_telegram(format_signal(signal))
+                            last_signals[ticker] = key
+                            signaux_du_jour.append({
+                                "ticker":    ticker,
+                                "direction": signal["direction"],
+                                "force":     signal["force"],
+                                "confiance": signal["confiance"],
+                            })
+                            time.sleep(3)
 
-        print("[" + now.strftime("%H:%M") + " UTC] Analyse en cours...")
-
-        for ticker in COINS:
-            signal = analyze(ticker)
-            if signal is None:
-                print(ticker + ": erreur donnees")
-                continue
-            print(ticker + ": " + signal["direction"] + " " + signal["force"] + " conf=" + str(signal["confiance"]) + "% ADX=" + str(signal["adx"]))
-
-            if signal["adx"] < 15 and not range_alerted[ticker]:
-                send_telegram(format_range_alert(ticker, signal["adx"], signal["price"]))
-                range_alerted[ticker] = True
-                time.sleep(2)
-                continue
-            elif signal["adx"] >= 15:
-                range_alerted[ticker] = False
-
-            if signal["force"] in ("FORT", "TRES FORT") and signal["confiance"] >= 50:
-                key = signal["direction"] + signal["force"] + str(int(signal["confiance"] / 10))
-                if key != last_signals[ticker]:
-                    send_telegram(format_signal(signal))
-                    last_signals[ticker] = key
-                    signaux_du_jour.append({
-                        "ticker": ticker, "direction": signal["direction"],
-                        "force": signal["force"], "confiance": signal["confiance"],
-                    })
-                    time.sleep(3)
-
-        print("Prochain check dans " + str(CHECK_INTERVAL_MINUTES) + " min")
-        time.sleep(CHECK_INTERVAL_MINUTES * 60)
+        time.sleep(60)  # Boucle toutes les 60 secondes
 
 if __name__ == "__main__":
     run()
