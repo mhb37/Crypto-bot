@@ -70,6 +70,68 @@ def get_current(coin_id):
     except:
         return None, None
 
+def check_mouvement_brusque(coin_id, ticker, seuil_1h=2.0, seuil_4h=5.0):
+    """Detecte les mouvements brusques de prix."""
+    prices, _ = get_prices(coin_id, days=1)
+    if not prices or len(prices) < 5:
+        return None
+    price_now = prices[-1]
+    price_1h  = prices[-2]  if len(prices) >= 2  else price_now
+    price_4h  = prices[-5]  if len(prices) >= 5  else price_now
+    var_1h = round((price_now - price_1h) / price_1h * 100, 2)
+    var_4h = round((price_now - price_4h) / price_4h * 100, 2)
+    alertes = []
+    if abs(var_1h) >= seuil_1h:
+        direction = "HAUSSE" if var_1h > 0 else "BAISSE"
+        alertes.append(("1H", var_1h, direction))
+    if abs(var_4h) >= seuil_4h:
+        direction = "HAUSSE" if var_4h > 0 else "BAISSE"
+        alertes.append(("4H", var_4h, direction))
+    if not alertes:
+        return None
+    return {
+        "ticker":    ticker,
+        "price":     price_now,
+        "var_1h":    var_1h,
+        "var_4h":    var_4h,
+        "alertes":   alertes,
+    }
+
+def format_mouvement(m):
+    now  = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
+    sign_1h = "+" if m["var_1h"] >= 0 else ""
+    sign_4h = "+" if m["var_4h"] >= 0 else ""
+    emoji_1h = "HAUSSE" if m["var_1h"] >= 0 else "BAISSE"
+    emoji_4h = "HAUSSE" if m["var_4h"] >= 0 else "BAISSE"
+    msg = (
+        "================================\n"
+        "  MOUVEMENT BRUSQUE DETECTE\n"
+        "================================\n"
+        "" + m["ticker"] + "/USDT   " + now + "\n"
+        "Prix : " + str(m["price"]) + " USD\n"
+        "\n"
+        "1H : " + emoji_1h + " " + sign_1h + str(m["var_1h"]) + "%\n"
+        "4H : " + emoji_4h + " " + sign_4h + str(m["var_4h"]) + "%\n"
+        "\n"
+    )
+    for periode, var, direction in m["alertes"]:
+        if abs(var) >= 8:
+            msg += "ALERTE EXTREME sur " + periode + " !\n"
+            msg += "Verifier les news immediatement.\n"
+        elif abs(var) >= 5:
+            msg += "Mouvement fort sur " + periode + ".\n"
+            msg += "Opportunite ou risque a surveiller.\n"
+        else:
+            msg += "Mouvement notable sur " + periode + ".\n"
+    msg += (
+        "\n"
+        "================================\n"
+        "Pas un conseil financier\n"
+        "================================"
+    )
+    return msg
+
+
 def ema(prices, period):
     k = 2.0 / (period + 1)
     v = prices[0]
@@ -476,6 +538,9 @@ def run():
     weekend_notified = False
     signaux_du_jour  = []
     last_recap_day   = -1
+    last_mouvement   = {"BTC": 0, "XRP": 0, "ETH": 0}
+last_check_mvt   = 0
+
 
     while True:
         now = datetime.utcnow()
@@ -499,6 +564,17 @@ def run():
             continue
         else:
             weekend_notified = False
+        # Check mouvements brusques toutes les 5 minutes
+        if time.time() - last_check_mvt >= 300:
+            last_check_mvt = time.time()
+            for ticker in COINS:
+                mvt = check_mouvement_brusque(COINS[ticker], ticker)
+                if mvt:
+                    key = str(int(abs(mvt["var_1h"]))) + str(int(abs(mvt["var_4h"])))
+                    if key != last_mouvement[ticker]:
+                        send_telegram(format_mouvement(mvt))
+                        last_mouvement[ticker] = key
+                        time.sleep(2)
 
         if is_heure_creuse():
             print("[" + now.strftime("%H:%M") + " UTC] Heure creuse — pause")
