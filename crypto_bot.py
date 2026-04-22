@@ -8,16 +8,15 @@ from datetime import datetime
 TELEGRAM_TOKEN   = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
 
-# Seuils de detection
-SEUIL_DETECTION  = 2.0   # % mouvement pour 1ere alerte
-SEUIL_CONFIRMATION = 3.5 # % mouvement pour confirmation entree
-SEUIL_EXTREME    = 6.0   # % mouvement extreme
+# Seuils assouplis
+SEUIL_DETECTION    = 1.0   # % mouvement 1ere alerte (etait 2.0)
+SEUIL_CONFIRMATION = 2.0   # % mouvement confirmation (etait 3.5)
+SEUIL_EXTREME      = 4.0   # % mouvement extreme (etait 6.0)
 
-# Intervalles
-CHECK_SEC        = 300    # Check toutes les 5 min
-PAUSE_WEEKEND    = True
-HEURE_DEBUT      = 5      # 5h UTC = 7h Paris
-HEURE_FIN        = 21     # 21h UTC = 23h Paris
+CHECK_SEC      = 180       # Check toutes les 3 min (etait 5 min)
+PAUSE_WEEKEND  = True
+HEURE_DEBUT    = 5         # 5h UTC = 7h Paris
+HEURE_FIN      = 21        # 21h UTC = 23h Paris
 # ═══════════════════════════════════════════
 
 COINS = {
@@ -26,9 +25,6 @@ COINS = {
     "ETH": "ethereum",
 }
 
-# ───────────────────────────────────────────
-#  TELEGRAM
-# ───────────────────────────────────────────
 def send_telegram(message):
     url = "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/sendMessage"
     try:
@@ -39,9 +35,6 @@ def send_telegram(message):
         print("Erreur Telegram: " + str(e))
         return False
 
-# ───────────────────────────────────────────
-#  FILTRES
-# ───────────────────────────────────────────
 def is_weekend():
     return datetime.utcnow().weekday() >= 5
 
@@ -49,14 +42,11 @@ def is_heure_creuse():
     h = datetime.utcnow().hour
     return h < HEURE_DEBUT or h >= HEURE_FIN
 
-# ───────────────────────────────────────────
-#  DONNEES PRIX
-# ───────────────────────────────────────────
 def get_prix_historique(coin_id, days=2):
     url = "https://api.coingecko.com/api/v3/coins/" + coin_id + "/market_chart"
     params = {"vs_currency": "usd", "days": str(days), "interval": "hourly"}
     try:
-        time.sleep(12)
+        time.sleep(10)
         r = requests.get(url, params=params, timeout=15)
         data = r.json()
         if "prices" not in data:
@@ -76,32 +66,27 @@ def get_prix_actuel(coin_id):
     except:
         return None, None
 
-# ───────────────────────────────────────────
-#  DETECTION MOUVEMENT
-# ───────────────────────────────────────────
 def analyser_mouvement(ticker, coin_id):
     prices = get_prix_historique(coin_id, days=2)
     if not prices or len(prices) < 6:
         return None
 
-    prix_actuel  = prices[-1]
-    prix_1h      = prices[-2]
-    prix_2h      = prices[-3]
-    prix_4h      = prices[-5] if len(prices) >= 5 else prices[0]
-    prix_6h      = prices[-7] if len(prices) >= 7 else prices[0]
+    prix_actuel = prices[-1]
+    prix_1h     = prices[-2]  if len(prices) >= 2 else prix_actuel
+    prix_2h     = prices[-3]  if len(prices) >= 3 else prix_actuel
+    prix_4h     = prices[-5]  if len(prices) >= 5 else prix_actuel
+    prix_6h     = prices[-7]  if len(prices) >= 7 else prix_actuel
+    prix_24h    = prices[-25] if len(prices) >= 25 else prices[0]
 
     var_1h  = round((prix_actuel - prix_1h)  / prix_1h  * 100, 2)
     var_2h  = round((prix_actuel - prix_2h)  / prix_2h  * 100, 2)
     var_4h  = round((prix_actuel - prix_4h)  / prix_4h  * 100, 2)
     var_6h  = round((prix_actuel - prix_6h)  / prix_6h  * 100, 2)
+    var_24h = round((prix_actuel - prix_24h) / prix_24h * 100, 2)
 
-    # Direction dominante
-    if var_1h > 0:
-        direction = "HAUSSE"
-    else:
-        direction = "BAISSE"
+    direction = "HAUSSE" if var_1h >= 0 else "BAISSE"
 
-    # Coherence du mouvement (meme direction sur plusieurs periodes)
+    # Coherence direction sur plusieurs periodes
     coherence = 0
     if var_1h > 0 and var_2h > 0: coherence += 1
     if var_2h > 0 and var_4h > 0: coherence += 1
@@ -110,8 +95,7 @@ def analyser_mouvement(ticker, coin_id):
     if var_2h < 0 and var_4h < 0: coherence += 1
     if var_4h < 0 and var_6h < 0: coherence += 1
 
-    # Acceleration (mouvement qui s'accelere)
-    acceleration = abs(var_1h) > abs(var_2h - var_1h)
+    acceleration = abs(var_1h) > abs(var_2h) * 0.8
 
     return {
         "ticker":       ticker,
@@ -120,33 +104,32 @@ def analyser_mouvement(ticker, coin_id):
         "var_2h":       var_2h,
         "var_4h":       var_4h,
         "var_6h":       var_6h,
+        "var_24h":      var_24h,
         "direction":    direction,
         "coherence":    coherence,
         "acceleration": acceleration,
     }
 
 def niveau_signal(m):
-    """Determine le niveau du signal : AUCUN / DETECTION / CONFIRMATION / EXTREME"""
     force_1h = abs(m["var_1h"])
     force_4h = abs(m["var_4h"])
 
     if force_1h >= SEUIL_EXTREME or force_4h >= SEUIL_EXTREME:
         return "EXTREME"
-    elif force_1h >= SEUIL_CONFIRMATION and m["coherence"] >= 2:
+    elif force_1h >= SEUIL_CONFIRMATION and m["coherence"] >= 1:
         return "CONFIRMATION"
     elif force_1h >= SEUIL_DETECTION:
         return "DETECTION"
     return "AUCUN"
 
-# ───────────────────────────────────────────
-#  FORMATAGE MESSAGES
-# ───────────────────────────────────────────
-def format_detection(m):
-    now   = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
-    s1h   = "+" if m["var_1h"] >= 0 else ""
-    s4h   = "+" if m["var_4h"] >= 0 else ""
-    fleche = "HAUSSE" if m["direction"] == "HAUSSE" else "BAISSE"
+def signe(v):
+    return "+" if v >= 0 else ""
 
+def fleche(direction):
+    return "HAUSSE" if direction == "HAUSSE" else "BAISSE"
+
+def format_detection(m):
+    now = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
     return (
         "================================\n"
         "  DETECTION - " + m["ticker"] + "/USDT\n"
@@ -154,26 +137,21 @@ def format_detection(m):
         "" + now + "\n"
         "Prix : " + str(round(m["prix"], 4)) + " USD\n"
         "\n"
-        "Mouvement : " + fleche + "\n"
-        "1H : " + s1h + str(m["var_1h"]) + "%\n"
-        "4H : " + s4h + str(m["var_4h"]) + "%\n"
+        "Mouvement : " + fleche(m["direction"]) + "\n"
+        "1H  : " + signe(m["var_1h"])  + str(m["var_1h"])  + "%\n"
+        "4H  : " + signe(m["var_4h"])  + str(m["var_4h"])  + "%\n"
+        "24H : " + signe(m["var_24h"]) + str(m["var_24h"]) + "%\n"
         "\n"
         "Mouvement detecte.\n"
-        "En attente de confirmation...\n"
-        "\n"
-        "Ne pas entrer en position.\n"
+        "Surveiller pour confirmation.\n"
+        "Ne pas entrer encore.\n"
         "================================"
     )
 
 def format_confirmation(m):
-    now    = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
-    s1h    = "+" if m["var_1h"] >= 0 else ""
-    s4h    = "+" if m["var_4h"] >= 0 else ""
-    s6h    = "+" if m["var_6h"] >= 0 else ""
-    fleche = "HAUSSE" if m["direction"] == "HAUSSE" else "BAISSE"
+    now      = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
     position = "LONG" if m["direction"] == "HAUSSE" else "SHORT"
-    accel  = "OUI" if m["acceleration"] else "NON"
-
+    accel    = "OUI" if m["acceleration"] else "NON"
     return (
         "================================\n"
         "  SIGNAL CONFIRME - " + position + "\n"
@@ -181,28 +159,27 @@ def format_confirmation(m):
         "" + m["ticker"] + "/USDT   " + now + "\n"
         "Prix entree : " + str(round(m["prix"], 4)) + " USD\n"
         "\n"
-        "Direction : " + fleche + "\n"
-        "Coherence : " + str(m["coherence"]) + "/3\n"
+        "Direction    : " + fleche(m["direction"]) + "\n"
+        "Coherence    : " + str(m["coherence"]) + "/3\n"
         "Acceleration : " + accel + "\n"
         "\n"
-        "1H : " + s1h + str(m["var_1h"]) + "%\n"
-        "4H : " + s4h + str(m["var_4h"]) + "%\n"
-        "6H : " + s6h + str(m["var_6h"]) + "%\n"
+        "1H  : " + signe(m["var_1h"])  + str(m["var_1h"])  + "%\n"
+        "2H  : " + signe(m["var_2h"])  + str(m["var_2h"])  + "%\n"
+        "4H  : " + signe(m["var_4h"])  + str(m["var_4h"])  + "%\n"
+        "6H  : " + signe(m["var_6h"])  + str(m["var_6h"])  + "%\n"
+        "24H : " + signe(m["var_24h"]) + str(m["var_24h"]) + "%\n"
         "\n"
         "================================\n"
-        "  RENTRER EN POSITION " + position + "\n"
-        "  Maintenir jusqu'a inversion\n"
+        " RENTRER EN POSITION " + position + "\n"
+        " Maintenir jusqu'a inversion\n"
         "================================\n"
         "Pas un conseil financier\n"
         "================================"
     )
 
 def format_extreme(m):
-    now    = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
-    s1h    = "+" if m["var_1h"] >= 0 else ""
-    s4h    = "+" if m["var_4h"] >= 0 else ""
+    now      = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
     position = "LONG" if m["direction"] == "HAUSSE" else "SHORT"
-
     return (
         "================================\n"
         "  MOUVEMENT EXTREME !\n"
@@ -210,12 +187,12 @@ def format_extreme(m):
         "" + m["ticker"] + "/USDT   " + now + "\n"
         "Prix : " + str(round(m["prix"], 4)) + " USD\n"
         "\n"
-        "1H : " + s1h + str(m["var_1h"]) + "%\n"
-        "4H : " + s4h + str(m["var_4h"]) + "%\n"
+        "1H  : " + signe(m["var_1h"])  + str(m["var_1h"])  + "%\n"
+        "4H  : " + signe(m["var_4h"])  + str(m["var_4h"])  + "%\n"
+        "24H : " + signe(m["var_24h"]) + str(m["var_24h"]) + "%\n"
         "\n"
         "VERIFIER LES NEWS !\n"
         "Evenement majeur possible.\n"
-        "\n"
         "Si confirmation : " + position + "\n"
         "Prudence sur le levier.\n"
         "================================\n"
@@ -223,10 +200,9 @@ def format_extreme(m):
         "================================"
     )
 
-def format_inversion(ticker, prix, ancienne_direction, nouvelle_direction):
+def format_inversion(ticker, prix, ancienne_dir, nouvelle_dir):
     now      = datetime.utcnow().strftime("%d/%m %H:%M") + " UTC"
-    nouvelle_pos = "LONG" if nouvelle_direction == "HAUSSE" else "SHORT"
-
+    position = "LONG" if nouvelle_dir == "HAUSSE" else "SHORT"
     return (
         "================================\n"
         "  INVERSION DETECTEE\n"
@@ -234,11 +210,11 @@ def format_inversion(ticker, prix, ancienne_direction, nouvelle_direction):
         "" + ticker + "/USDT   " + now + "\n"
         "Prix : " + str(round(prix, 4)) + " USD\n"
         "\n"
-        "Tendance " + ancienne_direction + " terminee.\n"
-        "Nouveau mouvement : " + nouvelle_direction + "\n"
+        "Tendance " + fleche(ancienne_dir) + " terminee.\n"
+        "Nouveau mouvement : " + fleche(nouvelle_dir) + "\n"
         "\n"
         "FERMER LA POSITION EN COURS.\n"
-        "Surveiller pour nouveau " + nouvelle_pos + ".\n"
+        "Surveiller pour nouveau " + position + ".\n"
         "================================\n"
         "Pas un conseil financier\n"
         "================================"
@@ -256,35 +232,31 @@ def format_recap(signaux):
         msg += "Aucun signal envoye aujourd'hui.\n"
     else:
         for s in signaux:
-            msg += s + "\n"
+            msg += "- " + s + "\n"
     msg += "================================"
     return msg
 
-# ───────────────────────────────────────────
-#  BOUCLE PRINCIPALE
-# ───────────────────────────────────────────
 def run():
     print("Bot V5 demarre")
     send_telegram(
         "================================\n"
         "  CRYPTO SIGNAL BOT V5\n"
         "================================\n"
-        "Paires   : BTC / XRP / ETH\n"
-        "Mode     : Mouvements de prix\n"
-        "Check    : toutes les 5 min\n"
-        "Detection  : +" + str(SEUIL_DETECTION) + "%\n"
-        "Confirmation: +" + str(SEUIL_CONFIRMATION) + "%\n"
-        "Extreme    : +" + str(SEUIL_EXTREME) + "%\n"
-        "Filtre   : 7h - 23h Paris\n"
-        "Pause WE : OUI\n"
+        "Paires      : BTC / XRP / ETH\n"
+        "Mode        : Mouvements prix\n"
+        "Check       : toutes les 3 min\n"
+        "Detection   : " + str(SEUIL_DETECTION) + "%\n"
+        "Confirmation: " + str(SEUIL_CONFIRMATION) + "%\n"
+        "Extreme     : " + str(SEUIL_EXTREME) + "%\n"
+        "Filtre      : 7h - 23h Paris\n"
+        "Pause WE    : OUI\n"
         "================================"
     )
 
-    # Etat par crypto
     etat = {
-        "BTC": {"niveau": "AUCUN", "direction": None, "alerte_envoyee": "AUCUN"},
-        "XRP": {"niveau": "AUCUN", "direction": None, "alerte_envoyee": "AUCUN"},
-        "ETH": {"niveau": "AUCUN", "direction": None, "alerte_envoyee": "AUCUN"},
+        "BTC": {"direction": None, "alerte_envoyee": "AUCUN"},
+        "XRP": {"direction": None, "alerte_envoyee": "AUCUN"},
+        "ETH": {"direction": None, "alerte_envoyee": "AUCUN"},
     }
 
     weekend_notified = False
@@ -294,7 +266,7 @@ def run():
     while True:
         now = datetime.utcnow()
 
-        # Recap quotidien 18h UTC = 20h Paris
+        # Recap 18h UTC = 20h Paris
         if now.hour == 18 and now.day != last_recap_day:
             send_telegram(format_recap(signaux_du_jour))
             signaux_du_jour = []
@@ -311,21 +283,20 @@ def run():
                     "================================"
                 )
                 weekend_notified = True
-                # Reset etats le weekend
                 for t in etat:
-                    etat[t] = {"niveau": "AUCUN", "direction": None, "alerte_envoyee": "AUCUN"}
+                    etat[t] = {"direction": None, "alerte_envoyee": "AUCUN"}
             time.sleep(3600)
             continue
         else:
             weekend_notified = False
 
-        # Pause heure creuse
+        # Heure creuse
         if is_heure_creuse():
             print("[" + now.strftime("%H:%M") + " UTC] Heure creuse")
             time.sleep(CHECK_SEC)
             continue
 
-        print("[" + now.strftime("%H:%M") + " UTC] Analyse mouvements...")
+        print("[" + now.strftime("%H:%M") + " UTC] Analyse...")
 
         for ticker, coin_id in COINS.items():
             m = analyser_mouvement(ticker, coin_id)
@@ -337,25 +308,25 @@ def run():
             e      = etat[ticker]
 
             print(
-                ticker + " | " + m["direction"] +
-                " | 1H=" + str(m["var_1h"]) + "%" +
-                " | 4H=" + str(m["var_4h"]) + "%" +
-                " | coherence=" + str(m["coherence"]) +
-                " | niveau=" + niveau
+                ticker +
+                " 1H=" + str(m["var_1h"]) + "%" +
+                " 4H=" + str(m["var_4h"]) + "%" +
+                " coh=" + str(m["coherence"]) +
+                " -> " + niveau
             )
 
-            # Inversion de tendance — priorite maximale
+            # Inversion de tendance
             if (e["direction"] is not None and
                 e["alerte_envoyee"] == "CONFIRMATION" and
                 m["direction"] != e["direction"] and
                 abs(m["var_1h"]) >= SEUIL_DETECTION):
                 send_telegram(format_inversion(ticker, m["prix"], e["direction"], m["direction"]))
                 signaux_du_jour.append(ticker + " : INVERSION vers " + m["direction"])
-                etat[ticker] = {"niveau": "DETECTION", "direction": m["direction"], "alerte_envoyee": "DETECTION"}
+                etat[ticker] = {"direction": m["direction"], "alerte_envoyee": "DETECTION"}
                 time.sleep(2)
                 continue
 
-            # Mouvement EXTREME
+            # EXTREME
             if niveau == "EXTREME" and e["alerte_envoyee"] != "EXTREME":
                 send_telegram(format_extreme(m))
                 signaux_du_jour.append(ticker + " : EXTREME " + m["direction"])
@@ -363,15 +334,15 @@ def run():
                 etat[ticker]["direction"]       = m["direction"]
                 time.sleep(2)
 
-            # CONFIRMATION — entrer en position
+            # CONFIRMATION
             elif niveau == "CONFIRMATION" and e["alerte_envoyee"] not in ("CONFIRMATION", "EXTREME"):
                 send_telegram(format_confirmation(m))
-                signaux_du_jour.append(ticker + " : CONFIRMATION " + ("LONG" if m["direction"] == "HAUSSE" else "SHORT"))
+                signaux_du_jour.append(ticker + " : SIGNAL " + ("LONG" if m["direction"] == "HAUSSE" else "SHORT"))
                 etat[ticker]["alerte_envoyee"] = "CONFIRMATION"
                 etat[ticker]["direction"]       = m["direction"]
                 time.sleep(2)
 
-            # DETECTION — premiere alerte
+            # DETECTION
             elif niveau == "DETECTION" and e["alerte_envoyee"] == "AUCUN":
                 send_telegram(format_detection(m))
                 signaux_du_jour.append(ticker + " : DETECTION " + m["direction"])
@@ -379,9 +350,9 @@ def run():
                 etat[ticker]["direction"]       = m["direction"]
                 time.sleep(2)
 
-            # Retour au calme — reset
-            elif niveau == "AUCUN" and abs(m["var_1h"]) < 1.0 and abs(m["var_4h"]) < 2.0:
-                etat[ticker] = {"niveau": "AUCUN", "direction": None, "alerte_envoyee": "AUCUN"}
+            # Reset si calme
+            elif niveau == "AUCUN" and abs(m["var_1h"]) < 0.5 and abs(m["var_4h"]) < 1.5:
+                etat[ticker] = {"direction": None, "alerte_envoyee": "AUCUN"}
 
         time.sleep(CHECK_SEC)
 
