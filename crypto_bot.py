@@ -1,10 +1,11 @@
 import requests
 import time
+import os
 from datetime import datetime
 
 TELEGRAM_TOKEN = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
-GEMINI_API_KEY = "AIzaSyB6X2Ee5M6uGkuSYIiefQBr4L8EXREwago"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 PAUSE_WEEKEND = True
 HEURE_DEBUT = 5
