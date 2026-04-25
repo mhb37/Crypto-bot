@@ -4,24 +4,11 @@ from datetime import datetime
 
 TELEGRAM_TOKEN = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
+GEMINI_API_KEY = "AIzaSyB6X2Ee5M6uGkuSYIiefQBr4L8EXREwago"
 
 PAUSE_WEEKEND = True
 HEURE_DEBUT = 5
 HEURE_FIN = 21
-
-MOTS_POSITIFS = [
-    "bullish", "surge", "rally", "adoption", "approved", "record",
-    "high", "gain", "rise", "buy", "etf", "institutional", "breakout",
-    "hausse", "positif", "achat", "sommet", "accumulation", "support",
-    "moon", "pump", "green", "up", "growth", "partnership", "launch"
-]
-
-MOTS_NEGATIFS = [
-    "bearish", "crash", "drop", "ban", "hack", "scam", "fear",
-    "sell", "low", "loss", "regulation", "fine", "lawsuit", "fraud",
-    "baisse", "negatif", "vente", "chute", "liquidation", "dump",
-    "red", "down", "warning", "risk", "investigation", "collapse"
-]
 
 
 def send_telegram(message):
@@ -68,6 +55,7 @@ def get_prix_actuel():
         "vs_currencies": "usd",
         "include_24hr_change": "true",
         "include_7d_change": "true",
+        "include_market_cap": "true",
     }
     try:
         r = requests.get(url, params=params, timeout=10)
@@ -76,9 +64,54 @@ def get_prix_actuel():
             "prix": round(data["usd"], 2),
             "var_24h": round(data.get("usd_24h_change", 0), 2),
             "var_7d": round(data.get("usd_7d_change", 0), 2),
+            "market_cap": round(data.get("usd_market_cap", 0) / 1e9, 1),
         }
     except:
         return None
+
+
+def get_donnees_avancees():
+    url = "https://api.coingecko.com/api/v3/coins/bitcoin"
+    params = {
+        "localization": "false",
+        "tickers": "false",
+        "market_data": "true",
+        "community_data": "true",
+        "developer_data": "false",
+    }
+    try:
+        time.sleep(3)
+        r = requests.get(url, params=params, timeout=15)
+        data = r.json()
+        md = data.get("market_data", {})
+        cd = data.get("community_data", {})
+        return {
+            "ath": round(md.get("ath", {}).get("usd", 0), 0),
+            "ath_pct": round(md.get("ath_change_percentage", {}).get("usd", 0), 1),
+            "sentiment_up": data.get("sentiment_votes_up_percentage", 0),
+            "reddit_subscribers": cd.get("reddit_subscribers", 0),
+        }
+    except Exception as e:
+        print("Erreur donnees avancees: " + str(e))
+        return {}
+
+
+def get_fear_greed():
+    try:
+        r = requests.get("https://api.alternative.me/fng/?limit=3", timeout=10)
+        data = r.json()
+        results = data.get("data", [])
+        if results:
+            actuel = results[0]
+            return {
+                "valeur": actuel.get("value", "?"),
+                "label": actuel.get("value_classification", "?"),
+                "hier": results[1].get("value", "?") if len(results) > 1 else "?",
+                "avant_hier": results[2].get("value", "?") if len(results) > 2 else "?",
+            }
+    except Exception as e:
+        print("Erreur Fear and Greed: " + str(e))
+    return None
 
 
 def get_news_btc():
@@ -93,7 +126,7 @@ def get_news_btc():
         r = requests.get(url, params=params, timeout=10)
         data = r.json()
         titres = []
-        for item in data.get("results", [])[:12]:
+        for item in data.get("results", [])[:15]:
             titre = item.get("title", "")
             if titre:
                 titres.append(titre)
@@ -102,237 +135,209 @@ def get_news_btc():
         return []
 
 
-def analyser_sentiment_news(news):
-    if not news:
-        return 0, "Neutre", []
-    score = 0
-    news_resume = []
-    for titre in news[:8]:
-        t = titre.lower()
-        pts = 0
-        for mot in MOTS_POSITIFS:
-            if mot in t:
-                pts += 1
-        for mot in MOTS_NEGATIFS:
-            if mot in t:
-                pts -= 1
-        score += pts
-        news_resume.append(titre[:80])
-    if score >= 4:
-        sentiment = "Tres positif"
-    elif score >= 2:
-        sentiment = "Positif"
-    elif score <= -4:
-        sentiment = "Tres negatif"
-    elif score <= -2:
-        sentiment = "Negatif"
-    else:
-        sentiment = "Neutre"
-    return score, sentiment, news_resume
-
-
-def analyser_prix(prices, volumes):
+def preparer_resume_prix(prices, volumes, actuel):
     if not prices or len(prices) < 24:
-        return {}
+        return "Donnees indisponibles"
+
     prix_now = prices[-1]
     prix_1h = prices[-2] if len(prices) >= 2 else prix_now
     prix_4h = prices[-5] if len(prices) >= 5 else prix_now
     prix_6h = prices[-7] if len(prices) >= 7 else prix_now
+    prix_12h = prices[-13] if len(prices) >= 13 else prix_now
     prix_24h = prices[-25] if len(prices) >= 25 else prices[0]
     prix_48h = prices[-49] if len(prices) >= 49 else prices[0]
     prix_7j = prices[0]
-    var_1h = round((prix_now - prix_1h) / prix_1h * 100, 2)
-    var_4h = round((prix_now - prix_4h) / prix_4h * 100, 2)
-    var_6h = round((prix_now - prix_6h) / prix_6h * 100, 2)
-    var_24h = round((prix_now - prix_24h) / prix_24h * 100, 2)
-    var_48h = round((prix_now - prix_48h) / prix_48h * 100, 2)
-    var_7j = round((prix_now - prix_7j) / prix_7j * 100, 2)
-    haut_24h = round(max(prices[-25:]), 2)
-    bas_24h = round(min(prices[-25:]), 2)
-    haut_7j = round(max(prices), 2)
-    bas_7j = round(min(prices), 2)
+
+    def v(a, b):
+        return round((a - b) / b * 100, 2)
+
+    var_1h = v(prix_now, prix_1h)
+    var_4h = v(prix_now, prix_4h)
+    var_6h = v(prix_now, prix_6h)
+    var_12h = v(prix_now, prix_12h)
+    var_24h = v(prix_now, prix_24h)
+    var_48h = v(prix_now, prix_48h)
+    var_7j = v(prix_now, prix_7j)
+
+    haut_24h = round(max(prices[-25:]), 0)
+    bas_24h = round(min(prices[-25:]), 0)
+    haut_7j = round(max(prices), 0)
+    bas_7j = round(min(prices), 0)
+
     vol_recent = sum(volumes[-6:]) / 6 if len(volumes) >= 6 else 0
     vol_ancien = sum(volumes[-24:-6]) / 18 if len(volumes) >= 24 else vol_recent
     if vol_recent > vol_ancien * 1.15:
-        tendance_vol = "en hausse"
-        vol_score = 1
+        tendance_vol = "en forte hausse"
+    elif vol_recent > vol_ancien * 1.05:
+        tendance_vol = "en legere hausse"
     elif vol_recent < vol_ancien * 0.85:
-        tendance_vol = "en baisse"
-        vol_score = -1
+        tendance_vol = "en forte baisse"
+    elif vol_recent < vol_ancien * 0.95:
+        tendance_vol = "en legere baisse"
     else:
         tendance_vol = "stable"
-        vol_score = 0
+
     hausse_count = sum(1 for i in range(1, min(25, len(prices))) if prices[-i] > prices[-i-1])
-    if hausse_count > 14:
-        momentum = "fortement haussier"
-    elif hausse_count > 11:
-        momentum = "haussier"
-    elif hausse_count < 8:
-        momentum = "baissier"
-    elif hausse_count < 11:
-        momentum = "legerement baissier"
+    pct_hausse = round(hausse_count / 24 * 100, 0)
+
+    support = round(min(prices[-48:] if len(prices) >= 48 else prices), 0)
+    resistance = round(max(prices[-48:] if len(prices) >= 48 else prices), 0)
+
+    def s(val):
+        return "+" if val >= 0 else ""
+
+    resume = (
+        "Prix actuel : " + str(actuel["prix"]) + " USD\n"
+        + "Market cap  : " + str(actuel["market_cap"]) + " Mrd USD\n"
+        + "Variation 1H  : " + s(var_1h) + str(var_1h) + "%\n"
+        + "Variation 4H  : " + s(var_4h) + str(var_4h) + "%\n"
+        + "Variation 6H  : " + s(var_6h) + str(var_6h) + "%\n"
+        + "Variation 12H : " + s(var_12h) + str(var_12h) + "%\n"
+        + "Variation 24H : " + s(var_24h) + str(var_24h) + "%\n"
+        + "Variation 48H : " + s(var_48h) + str(var_48h) + "%\n"
+        + "Variation 7J  : " + s(var_7j) + str(var_7j) + "%\n"
+        + "Plus haut 24H : " + str(haut_24h) + " USD\n"
+        + "Plus bas 24H  : " + str(bas_24h) + " USD\n"
+        + "Plus haut 7J  : " + str(haut_7j) + " USD\n"
+        + "Plus bas 7J   : " + str(bas_7j) + " USD\n"
+        + "Volume        : " + tendance_vol + "\n"
+        + "Momentum 24H  : " + str(pct_hausse) + "% des heures en hausse\n"
+        + "Support cle   : " + str(support) + " USD\n"
+        + "Resistance cle: " + str(resistance) + " USD\n"
+    )
+    return resume
+
+
+def analyser_avec_gemini(resume_prix, fear_greed, donnees_avancees, news, heure_paris):
+    date_str = datetime.utcnow().strftime("%d/%m/%Y")
+
+    if fear_greed:
+        fg_texte = (
+            "Indice Fear and Greed actuel : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
+            + "Hier : " + str(fear_greed["hier"]) + "/100\n"
+            + "Avant-hier : " + str(fear_greed["avant_hier"]) + "/100"
+        )
     else:
-        momentum = "neutre"
-    score_prix = 0
-    if var_1h > 0: score_prix += 1
-    if var_1h > 1: score_prix += 1
-    if var_4h > 0: score_prix += 1
-    if var_24h > 0: score_prix += 1
-    if var_24h > 2: score_prix += 1
-    if var_7j > 0: score_prix += 1
-    if var_1h < 0: score_prix -= 1
-    if var_1h < -1: score_prix -= 1
-    if var_4h < 0: score_prix -= 1
-    if var_24h < 0: score_prix -= 1
-    if var_24h < -2: score_prix -= 1
-    if var_7j < 0: score_prix -= 1
-    score_prix += vol_score
-    recent_prices = prices[-48:] if len(prices) >= 48 else prices
-    support = round(min(recent_prices), 0)
-    resistance = round(max(recent_prices), 0)
-    pct_support = round((prix_now - support) / support * 100, 1)
-    pct_resistance = round((resistance - prix_now) / prix_now * 100, 1)
-    return {
-        "prix_now": prix_now,
-        "var_1h": var_1h,
-        "var_4h": var_4h,
-        "var_6h": var_6h,
-        "var_24h": var_24h,
-        "var_48h": var_48h,
-        "var_7j": var_7j,
-        "haut_24h": haut_24h,
-        "bas_24h": bas_24h,
-        "haut_7j": haut_7j,
-        "bas_7j": bas_7j,
-        "tendance_vol": tendance_vol,
-        "momentum": momentum,
-        "score_prix": score_prix,
-        "support": support,
-        "resistance": resistance,
-        "pct_support": pct_support,
-        "pct_resistance": pct_resistance,
+        fg_texte = "Indice Fear and Greed : non disponible"
+
+    if donnees_avancees:
+        da_texte = (
+            "ATH Bitcoin : " + str(int(donnees_avancees.get("ath", 0))) + " USD\n"
+            + "Distance ATH : " + str(donnees_avancees.get("ath_pct", 0)) + "%\n"
+            + "Sentiment communaute : " + str(donnees_avancees.get("sentiment_up", 0)) + "% haussier\n"
+        )
+    else:
+        da_texte = ""
+
+    if news:
+        news_texte = ""
+        for i, titre in enumerate(news[:10]):
+            news_texte = news_texte + str(i+1) + ". " + titre + "\n"
+    else:
+        news_texte = "Aucune news disponible."
+
+    prompt = (
+        "Tu es un expert analyste Bitcoin tres reconnu. Nous sommes le "
+        + date_str + " a " + heure_paris + " heure de Paris.\n\n"
+        + "Voici toutes les donnees disponibles sur Bitcoin :\n\n"
+        + "=== DONNEES DE PRIX ===\n"
+        + resume_prix + "\n"
+        + "=== SENTIMENT DU MARCHE ===\n"
+        + fg_texte + "\n\n"
+        + "=== DONNEES COMPLEMENTAIRES ===\n"
+        + da_texte + "\n"
+        + "=== NEWS CHAUDES DU MOMENT ===\n"
+        + news_texte + "\n"
+        + "En analysant TOUTES ces donnees, redige une analyse courte et directe en francais.\n"
+        + "Reponds EXACTEMENT dans ce format :\n\n"
+        + "CONSEIL : LONG ou SHORT ou ATTENDRE\n"
+        + "CONFIANCE : Faible ou Moyenne ou Forte\n\n"
+        + "CONTEXTE :\n"
+        + "2 phrases maximum sur la situation actuelle de BTC\n\n"
+        + "RAISONS :\n"
+        + "- raison 1\n"
+        + "- raison 2\n"
+        + "- raison 3\n\n"
+        + "RISQUES :\n"
+        + "- risque principal\n\n"
+        + "NIVEAUX CLES :\n"
+        + "Support : prix USD\n"
+        + "Resistance : prix USD\n"
+        + "Objectif : prix USD\n"
+    )
+
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 500,
+        }
     }
 
-
-def generer_conseil(score_prix, score_news, analyse):
-    score_total = score_prix * 0.6 + score_news * 0.4
-    raisons_long = []
-    raisons_short = []
-    raisons_attendre = []
-    if analyse.get("var_24h", 0) > 2:
-        raisons_long.append("Hausse de " + str(analyse["var_24h"]) + "% sur 24h")
-    elif analyse.get("var_24h", 0) < -2:
-        raisons_short.append("Baisse de " + str(analyse["var_24h"]) + "% sur 24h")
-    if analyse.get("var_7j", 0) > 3:
-        raisons_long.append("Tendance haussiere sur 7 jours (" + str(analyse["var_7j"]) + "%)")
-    elif analyse.get("var_7j", 0) < -3:
-        raisons_short.append("Tendance baissiere sur 7 jours (" + str(analyse["var_7j"]) + "%)")
-    if "haussier" in analyse.get("momentum", ""):
-        raisons_long.append("Momentum " + analyse["momentum"])
-    elif "baissier" in analyse.get("momentum", ""):
-        raisons_short.append("Momentum " + analyse["momentum"])
-    if analyse.get("tendance_vol") == "en hausse":
-        if score_prix > 0:
-            raisons_long.append("Volume en hausse confirme la tendance")
-        else:
-            raisons_short.append("Volume en hausse confirme la baisse")
-    if analyse.get("pct_support", 100) < 2:
-        raisons_long.append("Prix proche du support (" + str(int(analyse["support"])) + " USD)")
-    if analyse.get("pct_resistance", 100) < 2:
-        raisons_short.append("Prix proche resistance (" + str(int(analyse["resistance"])) + " USD)")
-    if score_news >= 2:
-        raisons_long.append("Sentiment des news positif")
-    elif score_news <= -2:
-        raisons_short.append("Sentiment des news negatif")
-    else:
-        raisons_attendre.append("Sentiment des news neutre")
-    if abs(analyse.get("var_24h", 0)) < 0.5:
-        raisons_attendre.append("Marche en consolidation")
-    if score_total >= 2.5:
-        conseil = "LONG"
-        confiance = "Forte" if score_total >= 4 else "Moyenne"
-        raisons = raisons_long[:3]
-    elif score_total <= -2.5:
-        conseil = "SHORT"
-        confiance = "Forte" if score_total <= -4 else "Moyenne"
-        raisons = raisons_short[:3]
-    else:
-        conseil = "ATTENDRE"
-        confiance = "Faible"
-        raisons = raisons_attendre[:2] if raisons_attendre else ["Signaux mixtes"]
-    return conseil, confiance, raisons
+    try:
+        r = requests.post(url, json=body, timeout=30)
+        data = r.json()
+        candidates = data.get("candidates", [])
+        if candidates:
+            content = candidates[0].get("content", {})
+            parts = content.get("parts", [])
+            if parts:
+                return parts[0].get("text", "").strip()
+        print("Erreur Gemini: " + str(data))
+        return None
+    except Exception as e:
+        print("Erreur Gemini: " + str(e))
+        return None
 
 
-def signe(v):
-    return "+" if v >= 0 else ""
-
-
-def format_analyse(actuel, analyse, conseil, confiance, raisons, sentiment, news_resume, heure_paris):
-    msg = (
+def format_message(analyse, actuel, fear_greed, heure_paris):
+    s24 = "+" if actuel["var_24h"] >= 0 else ""
+    s7 = "+" if actuel["var_7d"] >= 0 else ""
+    fg_line = ""
+    if fear_greed:
+        fg_line = "Fear&Greed : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
+    return (
         "================================\n"
         + "  ANALYSE BTC - " + heure_paris + " Paris\n"
         + "================================\n"
-        + "Prix    : " + str(actuel["prix"]) + " USD\n"
-        + "24H     : " + signe(actuel["var_24h"]) + str(actuel["var_24h"]) + "%\n"
-        + "7J      : " + signe(actuel["var_7d"]) + str(actuel["var_7d"]) + "%\n"
+        + "Prix : " + str(actuel["prix"]) + " USD\n"
+        + "24H  : " + s24 + str(actuel["var_24h"]) + "%\n"
+        + "7J   : " + s7 + str(actuel["var_7d"]) + "%\n"
+        + fg_line
         + "--------------------------------\n"
-        + "  CONSEIL : " + conseil + "\n"
-        + "  Confiance : " + confiance + "\n"
-        + "--------------------------------\n"
-        + "VARIATIONS :\n"
-        + "1H  : " + signe(analyse["var_1h"]) + str(analyse["var_1h"]) + "%\n"
-        + "4H  : " + signe(analyse["var_4h"]) + str(analyse["var_4h"]) + "%\n"
-        + "24H : " + signe(analyse["var_24h"]) + str(analyse["var_24h"]) + "%\n"
-        + "48H : " + signe(analyse["var_48h"]) + str(analyse["var_48h"]) + "%\n"
-        + "7J  : " + signe(analyse["var_7j"]) + str(analyse["var_7j"]) + "%\n"
-        + "\n"
-        + "Momentum : " + analyse["momentum"] + "\n"
-        + "Volume   : " + analyse["tendance_vol"] + "\n"
-        + "--------------------------------\n"
-        + "NIVEAUX CLES :\n"
-        + "Support    : " + str(int(analyse["support"])) + " USD\n"
-        + "Resistance : " + str(int(analyse["resistance"])) + " USD\n"
-        + "Haut 24H   : " + str(analyse["haut_24h"]) + " USD\n"
-        + "Bas 24H    : " + str(analyse["bas_24h"]) + " USD\n"
-        + "--------------------------------\n"
-        + "RAISONS :\n"
-    )
-    for r in raisons:
-        msg = msg + "- " + r + "\n"
-    msg = msg + (
-        "--------------------------------\n"
-        + "NEWS (sentiment : " + sentiment + ") :\n"
-    )
-    for titre in news_resume[:3]:
-        msg = msg + "- " + titre + "\n"
-    msg = msg + (
-        "================================\n"
+        + analyse
+        + "\n--------------------------------\n"
         + "Pas un conseil financier\n"
         + "================================"
     )
-    return msg
 
 
 def run():
-    print("Bot Predictif BTC demarre")
+    print("Bot BTC Predictif Gemini demarre")
     send_telegram(
         "================================\n"
-        + "  BOT PREDICTIF BTC\n"
+        + "  BOT PREDICTIF BTC + IA\n"
         + "================================\n"
-        + "Mode     : Analyse prix + news\n"
-        + "Frequence: toutes les heures\n"
-        + "Filtre   : 7h - 23h Paris\n"
-        + "Pause WE : OUI\n"
-        + "100% gratuit\n"
+        + "IA      : Google Gemini gratuit\n"
+        + "Sources : Prix, Volume, Fear&Greed\n"
+        + "          News crypto, Sentiment\n"
+        + "          Donnees marche avancees\n"
+        + "Analyse : toutes les heures\n"
+        + "Filtre  : 7h - 23h Paris\n"
+        + "Pause WE: OUI\n"
         + "================================\n"
         + "Premiere analyse dans 1 minute..."
     )
+
     weekend_notified = False
     derniere_analyse_h = -1
     time.sleep(60)
+
     while True:
         now = datetime.utcnow()
         heure_paris = str(now.hour + 2) + "h" + now.strftime("%M")
+
         if PAUSE_WEEKEND and is_weekend():
             if not weekend_notified:
                 send_telegram(
@@ -348,33 +353,47 @@ def run():
             continue
         else:
             weekend_notified = False
+
         if is_heure_creuse():
             print("[" + now.strftime("%H:%M") + " UTC] Heure creuse")
             time.sleep(1800)
             continue
+
         if now.hour != derniere_analyse_h:
             derniere_analyse_h = now.hour
-            print("[" + now.strftime("%H:%M") + " UTC] Analyse BTC...")
+            print("[" + now.strftime("%H:%M") + " UTC] Lancement analyse BTC...")
+
             prices, volumes = get_historique_btc()
             actuel = get_prix_actuel()
+
             if prices is None or actuel is None:
-                print("Erreur donnees")
+                print("Erreur donnees prix")
                 time.sleep(300)
                 continue
-            analyse = analyser_prix(prices, volumes)
+
+            resume_prix = preparer_resume_prix(prices, volumes, actuel)
+            fear_greed = get_fear_greed()
+            donnees_avancees = get_donnees_avancees()
             news = get_news_btc()
-            score_news, sentiment, news_resume = analyser_sentiment_news(news)
-            conseil, confiance, raisons = generer_conseil(
-                analyse.get("score_prix", 0),
-                score_news,
-                analyse
-            )
-            msg = format_analyse(
-                actuel, analyse, conseil, confiance,
-                raisons, sentiment, news_resume, heure_paris
-            )
-            send_telegram(msg)
-            print("Analyse envoyee : " + conseil + " (" + confiance + ")")
+
+            print("Donnees collectees. Analyse Gemini en cours...")
+            analyse = analyser_avec_gemini(resume_prix, fear_greed, donnees_avancees, news, heure_paris)
+
+            if analyse is None:
+                send_telegram(
+                    "================================\n"
+                    + "  ERREUR - " + heure_paris + " Paris\n"
+                    + "================================\n"
+                    + "Prix BTC : " + str(actuel["prix"]) + " USD\n"
+                    + "Analyse IA indisponible.\n"
+                    + "Reessai dans 1 heure.\n"
+                    + "================================"
+                )
+            else:
+                msg = format_message(analyse, actuel, fear_greed, heure_paris)
+                send_telegram(msg)
+                print("Analyse envoyee avec succes")
+
         time.sleep(600)
 
 
