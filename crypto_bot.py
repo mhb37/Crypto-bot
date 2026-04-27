@@ -655,4 +655,16 @@ def run():
                 send_telegram(
                     "================================\n"
                     + "  ALERTE NEWS IMPORTANTE !\n"
-                    +​​​​​​​​​​​​​​​​
+                    + "================================\n"
+                    + "NEWS : " + titre_urgent[:200] + "\n"
+                    + "================================\n"
+                    + "Analyse complete en cours...\n"
+                    + "================================"
+                )
+                time.sleep(5)
+                lancer_analyse("alerte_news", heure_paris)
+        time.sleep(60)
+
+
+if __name__ == "__main__":
+    run()
