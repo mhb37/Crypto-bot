@@ -12,6 +12,8 @@ PAUSE_WEEKEND = True
 HEURE_DEBUT = 5
 HEURE_FIN = 21
 SEUIL_MOUVEMENT = 3.0
+MAX_RETRY = 3
+RETRY_DELAY = 30
 
 MOTS_URGENTS = [
     "etf", "sec", "blackrock", "fidelity", "ban", "banned", "hack", "hacked",
@@ -53,186 +55,200 @@ def is_heure_creuse():
 
 
 def get_historique_btc():
-    url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
-    params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
-    try:
-        time.sleep(5)
-        r = requests.get(url, params=params, timeout=15)
-        data = r.json()
-        if "prices" not in data:
-            return None, None
-        prices = [p[1] for p in data["prices"]]
-        volumes = [v[1] for v in data["total_volumes"]]
-        return prices, volumes
-    except Exception as e:
-        print("Erreur CoinGecko: " + str(e))
-        return None, None
+    for tentative in range(MAX_RETRY):
+        try:
+            time.sleep(5)
+            url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
+            params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
+            r = requests.get(url, params=params, timeout=15)
+            data = r.json()
+            if "prices" not in data:
+                print("CoinGecko rate limit tentative " + str(tentative+1))
+                time.sleep(60)
+                continue
+            prices = [p[1] for p in data["prices"]]
+            volumes = [v[1] for v in data["total_volumes"]]
+            return prices, volumes
+        except Exception as e:
+            print("Erreur CoinGecko tentative " + str(tentative+1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
+    return None, None
 
 
 def get_prix_actuel():
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    params = {
-        "ids": "bitcoin",
-        "vs_currencies": "usd",
-        "include_24hr_change": "true",
-        "include_7d_change": "true",
-        "include_market_cap": "true",
-    }
-    try:
-        r = requests.get(url, params=params, timeout=10)
-        data = r.json()["bitcoin"]
-        return {
-            "prix": round(data["usd"], 2),
-            "var_24h": round(data.get("usd_24h_change", 0), 2),
-            "var_7d": round(data.get("usd_7d_change", 0), 2),
-            "market_cap": round(data.get("usd_market_cap", 0) / 1e9, 1),
-        }
-    except:
-        return None
+    for tentative in range(MAX_RETRY):
+        try:
+            url = "https://api.coingecko.com/api/v3/simple/price"
+            params = {
+                "ids": "bitcoin",
+                "vs_currencies": "usd",
+                "include_24hr_change": "true",
+                "include_7d_change": "true",
+                "include_market_cap": "true",
+            }
+            r = requests.get(url, params=params, timeout=10)
+            data = r.json()["bitcoin"]
+            return {
+                "prix": round(data["usd"], 2),
+                "var_24h": round(data.get("usd_24h_change", 0), 2),
+                "var_7d": round(data.get("usd_7d_change", 0), 2),
+                "market_cap": round(data.get("usd_market_cap", 0) / 1e9, 1),
+            }
+        except Exception as e:
+            print("Erreur prix tentative " + str(tentative+1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
+    return None
 
 
 def get_donnees_avancees():
-    url = "https://api.coingecko.com/api/v3/coins/bitcoin"
-    params = {
-        "localization": "false",
-        "tickers": "false",
-        "market_data": "true",
-        "community_data": "true",
-        "developer_data": "false",
-    }
-    try:
-        time.sleep(3)
-        r = requests.get(url, params=params, timeout=15)
-        data = r.json()
-        md = data.get("market_data", {})
-        cd = data.get("community_data", {})
-        return {
-            "ath": round(md.get("ath", {}).get("usd", 0), 0),
-            "ath_pct": round(md.get("ath_change_percentage", {}).get("usd", 0), 1),
-            "sentiment_up": data.get("sentiment_votes_up_percentage", 0),
-            "reddit_subscribers": cd.get("reddit_subscribers", 0),
-            "reddit_active": cd.get("reddit_active_accounts_48h", 0),
-        }
-    except Exception as e:
-        print("Erreur donnees avancees: " + str(e))
-        return {}
+    for tentative in range(MAX_RETRY):
+        try:
+            time.sleep(3)
+            url = "https://api.coingecko.com/api/v3/coins/bitcoin"
+            params = {
+                "localization": "false",
+                "tickers": "false",
+                "market_data": "true",
+                "community_data": "true",
+                "developer_data": "false",
+            }
+            r = requests.get(url, params=params, timeout=15)
+            data = r.json()
+            md = data.get("market_data", {})
+            cd = data.get("community_data", {})
+            return {
+                "ath": round(md.get("ath", {}).get("usd", 0), 0),
+                "ath_pct": round(md.get("ath_change_percentage", {}).get("usd", 0), 1),
+                "sentiment_up": data.get("sentiment_votes_up_percentage", 0),
+                "reddit_subscribers": cd.get("reddit_subscribers", 0),
+                "reddit_active": cd.get("reddit_active_accounts_48h", 0),
+            }
+        except Exception as e:
+            print("Erreur donnees avancees tentative " + str(tentative+1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
+    return {}
 
 
 def get_fear_greed():
-    try:
-        r = requests.get("https://api.alternative.me/fng/?limit=3", timeout=10)
-        data = r.json()
-        results = data.get("data", [])
-        if results:
-            actuel = results[0]
-            return {
-                "valeur": actuel.get("value", "?"),
-                "label": actuel.get("value_classification", "?"),
-                "hier": results[1].get("value", "?") if len(results) > 1 else "?",
-                "avant_hier": results[2].get("value", "?") if len(results) > 2 else "?",
-            }
-    except Exception as e:
-        print("Erreur Fear and Greed: " + str(e))
+    for tentative in range(MAX_RETRY):
+        try:
+            r = requests.get("https://api.alternative.me/fng/?limit=3", timeout=10)
+            data = r.json()
+            results = data.get("data", [])
+            if results:
+                actuel = results[0]
+                return {
+                    "valeur": actuel.get("value", "?"),
+                    "label": actuel.get("value_classification", "?"),
+                    "hier": results[1].get("value", "?") if len(results) > 1 else "?",
+                    "avant_hier": results[2].get("value", "?") if len(results) > 2 else "?",
+                }
+        except Exception as e:
+            print("Erreur Fear and Greed tentative " + str(tentative+1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
     return None
 
 
 def get_news_btc():
-    url = "https://cryptopanic.com/api/v1/posts/"
-    params = {
-        "auth_token": "free",
-        "currencies": "BTC",
-        "filter": "hot",
-        "public": "true",
-    }
-    try:
-        r = requests.get(url, params=params, timeout=10)
-        data = r.json()
-        titres = []
-        for item in data.get("results", [])[:15]:
-            titre = item.get("title", "")
-            if titre:
-                titres.append(titre)
-        return titres
-    except:
-        return []
+    for tentative in range(MAX_RETRY):
+        try:
+            url = "https://cryptopanic.com/api/v1/posts/"
+            params = {
+                "auth_token": "free",
+                "currencies": "BTC",
+                "filter": "hot",
+                "public": "true",
+            }
+            r = requests.get(url, params=params, timeout=10)
+            data = r.json()
+            titres = []
+            for item in data.get("results", [])[:15]:
+                titre = item.get("title", "")
+                if titre:
+                    titres.append(titre)
+            return titres
+        except Exception as e:
+            print("Erreur news tentative " + str(tentative+1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
+    return []
 
 
 def get_reddit_sentiment():
-    try:
-        headers = {"User-Agent": "CryptoBotAnalysis/1.0"}
-        url = "https://www.reddit.com/r/Bitcoin/hot.json?limit=25"
-        r = requests.get(url, headers=headers, timeout=10)
-        data = r.json()
-        posts = data.get("data", {}).get("children", [])
-        score_pos = 0
-        score_neg = 0
-        total_upvotes = 0
-        titres_reddit = []
-        for post in posts:
-            pd = post.get("data", {})
-            titre = pd.get("title", "").lower()
-            upvotes = pd.get("ups", 0)
-            total_upvotes += upvotes
-            for mot in MOTS_POSITIFS_REDDIT:
-                if mot in titre:
-                    score_pos += 1
-            for mot in MOTS_NEGATIFS_REDDIT:
-                if mot in titre:
-                    score_neg += 1
-            if upvotes > 500:
-                titres_reddit.append(pd.get("title", "")[:100])
-        score_net = score_pos - score_neg
-        if score_net >= 4:
-            sentiment = "Tres haussier"
-        elif score_net >= 2:
-            sentiment = "Haussier"
-        elif score_net <= -4:
-            sentiment = "Tres baissier"
-        elif score_net <= -2:
-            sentiment = "Baissier"
-        else:
-            sentiment = "Neutre"
-        return {
-            "sentiment": sentiment,
-            "score_pos": score_pos,
-            "score_neg": score_neg,
-            "score_net": score_net,
-            "top_posts": titres_reddit[:3],
-            "total_posts": len(posts),
-        }
-    except Exception as e:
-        print("Erreur Reddit: " + str(e))
-        return None
+    for tentative in range(MAX_RETRY):
+        try:
+            headers = {"User-Agent": "CryptoBotAnalysis/1.0"}
+            url = "https://www.reddit.com/r/Bitcoin/hot.json?limit=25"
+            r = requests.get(url, headers=headers, timeout=10)
+            data = r.json()
+            posts = data.get("data", {}).get("children", [])
+            score_pos = 0
+            score_neg = 0
+            titres_reddit = []
+            for post in posts:
+                pd = post.get("data", {})
+                titre = pd.get("title", "").lower()
+                upvotes = pd.get("ups", 0)
+                for mot in MOTS_POSITIFS_REDDIT:
+                    if mot in titre:
+                        score_pos += 1
+                for mot in MOTS_NEGATIFS_REDDIT:
+                    if mot in titre:
+                        score_neg += 1
+                if upvotes > 500:
+                    titres_reddit.append(pd.get("title", "")[:100])
+            score_net = score_pos - score_neg
+            if score_net >= 4:
+                sentiment = "Tres haussier"
+            elif score_net >= 2:
+                sentiment = "Haussier"
+            elif score_net <= -4:
+                sentiment = "Tres baissier"
+            elif score_net <= -2:
+                sentiment = "Baissier"
+            else:
+                sentiment = "Neutre"
+            return {
+                "sentiment": sentiment,
+                "score_pos": score_pos,
+                "score_neg": score_neg,
+                "score_net": score_net,
+                "top_posts": titres_reddit[:3],
+                "total_posts": len(posts),
+            }
+        except Exception as e:
+            print("Erreur Reddit tentative " + str(tentative+1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
+    return None
 
 
 def get_google_trends():
-    try:
-        url = "https://trends.google.com/trends/api/dailytrends"
-        params = {"hl": "fr", "tz": "-60", "geo": "FR", "ns": "15"}
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, params=params, headers=headers, timeout=10)
-        text = r.text
-        if text.startswith(")]}'"):
-            text = text[4:]
-        elif ")]}'" in text:
-            text = text[text.index(")]}'")+4:]
-        data = json.loads(text)
-        trending = data.get("default", {}).get("trendingSearchesDays", [])
-        btc_trending = False
-        btc_keywords = ["bitcoin", "btc", "crypto", "cryptocurrency"]
-        for day in trending:
-            for search in day.get("trendingSearches", []):
-                titre = search.get("title", {}).get("query", "").lower()
-                for kw in btc_keywords:
-                    if kw in titre:
-                        btc_trending = True
-        return {
-            "btc_trending": btc_trending,
-            "statut": "Bitcoin en tendance Google" if btc_trending else "Bitcoin non trending sur Google",
-        }
-    except Exception as e:
-        print("Erreur Google Trends: " + str(e))
-        return None
+    for tentative in range(MAX_RETRY):
+        try:
+            url = "https://trends.google.com/trends/api/dailytrends"
+            params = {"hl": "fr", "tz": "-60", "geo": "FR", "ns": "15"}
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.get(url, params=params, headers=headers, timeout=10)
+            text = r.text
+            if ")]}'" in text:
+                text = text[text.index(")]}'")+4:]
+            data = json.loads(text)
+            trending = data.get("default", {}).get("trendingSearchesDays", [])
+            btc_trending = False
+            btc_keywords = ["bitcoin", "btc", "crypto", "cryptocurrency"]
+            for day in trending:
+                for search in day.get("trendingSearches", []):
+                    titre = search.get("title", {}).get("query", "").lower()
+                    for kw in btc_keywords:
+                        if kw in titre:
+                            btc_trending = True
+            return {
+                "btc_trending": btc_trending,
+                "statut": "Bitcoin en tendance Google" if btc_trending else "Bitcoin non trending sur Google",
+            }
+        except Exception as e:
+            print("Erreur Google Trends tentative " + str(tentative+1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
+    return None
 
 
 def detecter_news_urgente(news):
@@ -394,19 +410,22 @@ def analyser_avec_gemini(resume_prix, fear_greed, donnees_avancees, news, reddit
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 500},
     }
-    try:
-        r = requests.post(url, json=body, timeout=30)
-        data = r.json()
-        candidates = data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if parts:
-                return parts[0].get("text", "").strip()
-        print("Erreur Gemini: " + str(data))
-        return None
-    except Exception as e:
-        print("Erreur Gemini: " + str(e))
-        return None
+    for tentative in range(MAX_RETRY):
+        try:
+            print("Gemini tentative " + str(tentative+1) + "/" + str(MAX_RETRY))
+            r = requests.post(url, json=body, timeout=30)
+            data = r.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "").strip()
+            print("Reponse Gemini invalide: " + str(data))
+            time.sleep(RETRY_DELAY)
+        except Exception as e:
+            print("Erreur Gemini tentative " + str(tentative+1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
+    return None
 
 
 def label_analyse(contexte, heure_paris):
@@ -469,6 +488,14 @@ def lancer_analyse(contexte, heure_paris):
     d = collecter_donnees()
     if d is None:
         print("Erreur donnees")
+        send_telegram(
+            "================================\n"
+            + "  ERREUR DONNEES - " + heure_paris + "\n"
+            + "================================\n"
+            + "Impossible de recuperer les donnees.\n"
+            + "Nouvelle tentative dans 30 min.\n"
+            + "================================"
+        )
         return False
     analyse = analyser_avec_gemini(
         d["resume_prix"], d["fear_greed"], d["donnees_avancees"],
@@ -477,10 +504,11 @@ def lancer_analyse(contexte, heure_paris):
     if analyse is None:
         send_telegram(
             "================================\n"
-            + "  ERREUR - " + heure_paris + " Paris\n"
+            + "  ERREUR GEMINI - " + heure_paris + "\n"
             + "================================\n"
             + "Prix BTC : " + str(d["actuel"]["prix"]) + " USD\n"
-            + "Analyse IA indisponible.\n"
+            + "Gemini indisponible apres " + str(MAX_RETRY) + " tentatives.\n"
+            + "Prochaine analyse prevue normalement.\n"
             + "================================"
         )
         return False
@@ -491,7 +519,7 @@ def lancer_analyse(contexte, heure_paris):
 
 
 def run():
-    print("Bot BTC V3 demarre")
+    print("Bot BTC V3 avec retry demarre")
     send_telegram(
         "================================\n"
         + "  BOT BTC INTELLIGENT V3\n"
@@ -505,6 +533,7 @@ def run():
         + "Analyses: 8h / 13h / 20h Paris\n"
         + "Alertes : Mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
         + "          News importantes\n"
+        + "Retry   : " + str(MAX_RETRY) + " tentatives si erreur\n"
         + "Pause WE: OUI\n"
         + "================================\n"
         + "Demarrage dans 1 minute..."
@@ -540,16 +569,25 @@ def run():
             time.sleep(600)
             continue
         if heure_paris_int == 8 and cle_jour + "_matin" not in analyses_faites:
-            lancer_analyse("matin", heure_paris)
-            analyses_faites.add(cle_jour + "_matin")
+            ok = lancer_analyse("matin", heure_paris)
+            if ok:
+                analyses_faites.add(cle_jour + "_matin")
+            else:
+                time.sleep(1800)
             time.sleep(30)
         elif heure_paris_int == 13 and cle_jour + "_midi" not in analyses_faites:
-            lancer_analyse("midi", heure_paris)
-            analyses_faites.add(cle_jour + "_midi")
+            ok = lancer_analyse("midi", heure_paris)
+            if ok:
+                analyses_faites.add(cle_jour + "_midi")
+            else:
+                time.sleep(1800)
             time.sleep(30)
         elif heure_paris_int == 20 and cle_jour + "_soir" not in analyses_faites:
-            lancer_analyse("soir", heure_paris)
-            analyses_faites.add(cle_jour + "_soir")
+            ok = lancer_analyse("soir", heure_paris)
+            if ok:
+                analyses_faites.add(cle_jour + "_soir")
+            else:
+                time.sleep(1800)
             time.sleep(30)
         if time.time() - dernier_check >= 600:
             dernier_check = time.time()
