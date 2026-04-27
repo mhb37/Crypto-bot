@@ -150,27 +150,58 @@ def get_fear_greed():
 
 
 def get_news_btc():
-    for tentative in range(MAX_RETRY):
-        try:
-            url = "https://cryptopanic.com/api/v1/posts/"
-            params = {
-                "auth_token": "free",
-                "currencies": "BTC",
-                "filter": "hot",
-                "public": "true",
-            }
-            r = requests.get(url, params=params, timeout=10)
-            data = r.json()
-            titres = []
-            for item in data.get("results", [])[:15]:
-                titre = item.get("title", "")
-                if titre:
+    titres = []
+
+    # Source 1 : CoinGecko News
+    try:
+        time.sleep(3)
+        r = requests.get("https://api.coingecko.com/api/v3/news", timeout=10)
+        data = r.json()
+        for item in data.get("data", [])[:10]:
+            titre = item.get("title", "")
+            if titre:
+                t = titre.lower()
+                if "bitcoin" in t or "btc" in t or "crypto" in t:
                     titres.append(titre)
-            return titres
-        except Exception as e:
-            print("Erreur news tentative " + str(tentative+1) + ": " + str(e))
-            time.sleep(RETRY_DELAY)
-    return []
+    except Exception as e:
+        print("Erreur CoinGecko news: " + str(e))
+
+    # Source 2 : RSS Cointelegraph
+    try:
+        url = "https://api.rss2json.com/v1/api.json"
+        params = {
+            "rss_url": "https://cointelegraph.com/rss/tag/bitcoin",
+            "count": "10",
+        }
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+        for item in data.get("items", [])[:10]:
+            titre = item.get("title", "")
+            if titre and titre not in titres:
+                titres.append(titre)
+    except Exception as e:
+        print("Erreur Cointelegraph RSS: " + str(e))
+
+    # Source 3 : RSS CoinDesk
+    try:
+        url = "https://api.rss2json.com/v1/api.json"
+        params = {
+            "rss_url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+            "count": "10",
+        }
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+        for item in data.get("items", [])[:10]:
+            titre = item.get("title", "")
+            if titre and titre not in titres:
+                t = titre.lower()
+                if "bitcoin" in t or "btc" in t or "crypto" in t:
+                    titres.append(titre)
+    except Exception as e:
+        print("Erreur CoinDesk RSS: " + str(e))
+
+    print("News recuperees : " + str(len(titres)))
+    return titres[:15]
 
 
 def get_reddit_sentiment():
@@ -527,7 +558,9 @@ def run():
         + "IA      : Google Gemini gratuit\n"
         + "Sources : Prix + Volume\n"
         + "          Fear and Greed\n"
-        + "          News CryptoPanic\n"
+        + "          News CoinGecko\n"
+        + "          News Cointelegraph\n"
+        + "          News CoinDesk\n"
         + "          Reddit r/Bitcoin\n"
         + "          Google Trends\n"
         + "Analyses: 8h / 13h / 20h Paris\n"
@@ -622,16 +655,4 @@ def run():
                 send_telegram(
                     "================================\n"
                     + "  ALERTE NEWS IMPORTANTE !\n"
-                    + "================================\n"
-                    + "NEWS : " + titre_urgent[:200] + "\n"
-                    + "================================\n"
-                    + "Analyse complete en cours...\n"
-                    + "================================"
-                )
-                time.sleep(5)
-                lancer_analyse("alerte_news", heure_paris)
-        time.sleep(60)
-
-
-if __name__ == "__main__":
-    run()
+                    +​​​​​​​​​​​​​​​​
