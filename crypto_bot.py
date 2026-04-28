@@ -77,6 +77,17 @@ def get_historique_btc():
 
 
 def get_prix_actuel():
+    try:
+        r = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=10)
+        data = r.json()
+        return {
+            "prix": round(float(data["lastPrice"]), 2),
+            "var_24h": round(float(data["priceChangePercent"]), 2),
+            "var_7d": 0,
+            "market_cap": 0,
+        }
+    except Exception as e:
+        print("Erreur Binance prix: " + str(e))
     for tentative in range(MAX_RETRY):
         try:
             url = "https://api.coingecko.com/api/v3/simple/price"
@@ -96,7 +107,7 @@ def get_prix_actuel():
                 "market_cap": round(data.get("usd_market_cap", 0) / 1e9, 1),
             }
         except Exception as e:
-            print("Erreur prix tentative " + str(tentative + 1) + ": " + str(e))
+            print("Erreur CoinGecko prix tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None
 
@@ -326,7 +337,6 @@ def preparer_resume_prix(prices, volumes, actuel):
 
     return (
         "Prix actuel : " + str(actuel["prix"]) + " USD\n"
-        "Market cap  : " + str(actuel["market_cap"]) + " Mrd USD\n"
         "Variation 1H  : " + s(var_1h) + str(var_1h) + "%\n"
         "Variation 4H  : " + s(var_4h) + str(var_4h) + "%\n"
         "Variation 6H  : " + s(var_6h) + str(var_6h) + "%\n"
@@ -479,7 +489,6 @@ def analyser_ia(resume_prix, fear_greed, donnees_avancees, news, reddit, trends,
     if analyse:
         print("Cohere OK")
         return analyse, "Cohere"
-    print("Les 2 IA ont echoue")
     return None, None
 
 
@@ -577,16 +586,16 @@ def lancer_analyse(contexte, heure_paris):
 
 
 def run():
-    print("Bot BTC V4 Gemini+Cohere demarre")
+    print("Bot BTC V4 demarre")
     send_telegram(
         "================================\n"
         "  BOT BTC INTELLIGENT V4\n"
         "================================\n"
         "IA 1    : Google Gemini\n"
         "IA 2    : Cohere (secours)\n"
-        "Sources : Prix, Fear&Greed\n"
-        "          News x3, Reddit\n"
-        "          Google Trends\n"
+        "Prix    : Binance + CoinGecko\n"
+        "Sources : Fear&Greed, News x3\n"
+        "          Reddit, Google Trends\n"
         "Analyses: 8h / 13h / 20h Paris\n"
         "Alertes : Mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
         "          News importantes\n"
