@@ -7,13 +7,14 @@ from datetime import datetime
 TELEGRAM_TOKEN = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+COHERE_API_KEY = os.environ.get("COHERE_API_KEY", "")
 
 PAUSE_WEEKEND = True
 HEURE_DEBUT = 5
 HEURE_FIN = 21
 SEUIL_MOUVEMENT = 3.0
 MAX_RETRY = 3
-RETRY_DELAY = 30
+RETRY_DELAY = 20
 
 MOTS_URGENTS = [
     "etf", "sec", "blackrock", "fidelity", "ban", "banned", "hack", "hacked",
@@ -63,14 +64,14 @@ def get_historique_btc():
             r = requests.get(url, params=params, timeout=15)
             data = r.json()
             if "prices" not in data:
-                print("CoinGecko rate limit tentative " + str(tentative+1))
+                print("CoinGecko rate limit tentative " + str(tentative + 1))
                 time.sleep(60)
                 continue
             prices = [p[1] for p in data["prices"]]
             volumes = [v[1] for v in data["total_volumes"]]
             return prices, volumes
         except Exception as e:
-            print("Erreur CoinGecko tentative " + str(tentative+1) + ": " + str(e))
+            print("Erreur CoinGecko tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None, None
 
@@ -95,7 +96,7 @@ def get_prix_actuel():
                 "market_cap": round(data.get("usd_market_cap", 0) / 1e9, 1),
             }
         except Exception as e:
-            print("Erreur prix tentative " + str(tentative+1) + ": " + str(e))
+            print("Erreur prix tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None
 
@@ -124,7 +125,7 @@ def get_donnees_avancees():
                 "reddit_active": cd.get("reddit_active_accounts_48h", 0),
             }
         except Exception as e:
-            print("Erreur donnees avancees tentative " + str(tentative+1) + ": " + str(e))
+            print("Erreur donnees avancees tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return {}
 
@@ -144,15 +145,13 @@ def get_fear_greed():
                     "avant_hier": results[2].get("value", "?") if len(results) > 2 else "?",
                 }
         except Exception as e:
-            print("Erreur Fear and Greed tentative " + str(tentative+1) + ": " + str(e))
+            print("Erreur Fear and Greed tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None
 
 
 def get_news_btc():
     titres = []
-
-    # Source 1 : CoinGecko News
     try:
         time.sleep(3)
         r = requests.get("https://api.coingecko.com/api/v3/news", timeout=10)
@@ -165,14 +164,9 @@ def get_news_btc():
                     titres.append(titre)
     except Exception as e:
         print("Erreur CoinGecko news: " + str(e))
-
-    # Source 2 : RSS Cointelegraph
     try:
         url = "https://api.rss2json.com/v1/api.json"
-        params = {
-            "rss_url": "https://cointelegraph.com/rss/tag/bitcoin",
-            "count": "10",
-        }
+        params = {"rss_url": "https://cointelegraph.com/rss/tag/bitcoin", "count": "10"}
         r = requests.get(url, params=params, timeout=10)
         data = r.json()
         for item in data.get("items", [])[:10]:
@@ -180,15 +174,10 @@ def get_news_btc():
             if titre and titre not in titres:
                 titres.append(titre)
     except Exception as e:
-        print("Erreur Cointelegraph RSS: " + str(e))
-
-    # Source 3 : RSS CoinDesk
+        print("Erreur Cointelegraph: " + str(e))
     try:
         url = "https://api.rss2json.com/v1/api.json"
-        params = {
-            "rss_url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
-            "count": "10",
-        }
+        params = {"rss_url": "https://www.coindesk.com/arc/outboundfeeds/rss/", "count": "10"}
         r = requests.get(url, params=params, timeout=10)
         data = r.json()
         for item in data.get("items", [])[:10]:
@@ -198,9 +187,8 @@ def get_news_btc():
                 if "bitcoin" in t or "btc" in t or "crypto" in t:
                     titres.append(titre)
     except Exception as e:
-        print("Erreur CoinDesk RSS: " + str(e))
-
-    print("News recuperees : " + str(len(titres)))
+        print("Erreur CoinDesk: " + str(e))
+    print("News recuperees: " + str(len(titres)))
     return titres[:15]
 
 
@@ -247,7 +235,7 @@ def get_reddit_sentiment():
                 "total_posts": len(posts),
             }
         except Exception as e:
-            print("Erreur Reddit tentative " + str(tentative+1) + ": " + str(e))
+            print("Erreur Reddit tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None
 
@@ -265,19 +253,18 @@ def get_google_trends():
             data = json.loads(text)
             trending = data.get("default", {}).get("trendingSearchesDays", [])
             btc_trending = False
-            btc_keywords = ["bitcoin", "btc", "crypto", "cryptocurrency"]
             for day in trending:
                 for search in day.get("trendingSearches", []):
                     titre = search.get("title", {}).get("query", "").lower()
-                    for kw in btc_keywords:
+                    for kw in ["bitcoin", "btc", "crypto", "cryptocurrency"]:
                         if kw in titre:
                             btc_trending = True
             return {
                 "btc_trending": btc_trending,
-                "statut": "Bitcoin en tendance Google" if btc_trending else "Bitcoin non trending sur Google",
+                "statut": "Bitcoin en tendance Google" if btc_trending else "Bitcoin non trending",
             }
         except Exception as e:
-            print("Erreur Google Trends tentative " + str(tentative+1) + ": " + str(e))
+            print("Erreur Google Trends tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None
 
@@ -339,103 +326,100 @@ def preparer_resume_prix(prices, volumes, actuel):
 
     return (
         "Prix actuel : " + str(actuel["prix"]) + " USD\n"
-        + "Market cap  : " + str(actuel["market_cap"]) + " Mrd USD\n"
-        + "Variation 1H  : " + s(var_1h) + str(var_1h) + "%\n"
-        + "Variation 4H  : " + s(var_4h) + str(var_4h) + "%\n"
-        + "Variation 6H  : " + s(var_6h) + str(var_6h) + "%\n"
-        + "Variation 12H : " + s(var_12h) + str(var_12h) + "%\n"
-        + "Variation 24H : " + s(var_24h) + str(var_24h) + "%\n"
-        + "Variation 48H : " + s(var_48h) + str(var_48h) + "%\n"
-        + "Variation 7J  : " + s(var_7j) + str(var_7j) + "%\n"
-        + "Plus haut 24H : " + str(haut_24h) + " USD\n"
-        + "Plus bas 24H  : " + str(bas_24h) + " USD\n"
-        + "Plus haut 7J  : " + str(haut_7j) + " USD\n"
-        + "Plus bas 7J   : " + str(bas_7j) + " USD\n"
-        + "Volume        : " + tendance_vol + "\n"
-        + "Momentum 24H  : " + str(pct_hausse) + "% des heures en hausse\n"
-        + "Support cle   : " + str(support) + " USD\n"
-        + "Resistance cle: " + str(resistance) + " USD\n"
+        "Market cap  : " + str(actuel["market_cap"]) + " Mrd USD\n"
+        "Variation 1H  : " + s(var_1h) + str(var_1h) + "%\n"
+        "Variation 4H  : " + s(var_4h) + str(var_4h) + "%\n"
+        "Variation 6H  : " + s(var_6h) + str(var_6h) + "%\n"
+        "Variation 12H : " + s(var_12h) + str(var_12h) + "%\n"
+        "Variation 24H : " + s(var_24h) + str(var_24h) + "%\n"
+        "Variation 48H : " + s(var_48h) + str(var_48h) + "%\n"
+        "Variation 7J  : " + s(var_7j) + str(var_7j) + "%\n"
+        "Plus haut 24H : " + str(haut_24h) + " USD\n"
+        "Plus bas 24H  : " + str(bas_24h) + " USD\n"
+        "Plus haut 7J  : " + str(haut_7j) + " USD\n"
+        "Plus bas 7J   : " + str(bas_7j) + " USD\n"
+        "Volume        : " + tendance_vol + "\n"
+        "Momentum 24H  : " + str(pct_hausse) + "% des heures en hausse\n"
+        "Support cle   : " + str(support) + " USD\n"
+        "Resistance cle: " + str(resistance) + " USD\n"
     )
 
 
-def analyser_avec_gemini(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte="analyse"):
+def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte):
     date_str = datetime.utcnow().strftime("%d/%m/%Y")
     if fear_greed:
-        fg_texte = (
+        fg = (
             "Fear and Greed actuel : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
-            + "Hier : " + str(fear_greed["hier"]) + "/100\n"
-            + "Avant-hier : " + str(fear_greed["avant_hier"]) + "/100"
+            "Hier : " + str(fear_greed["hier"]) + "/100\n"
+            "Avant-hier : " + str(fear_greed["avant_hier"]) + "/100"
         )
     else:
-        fg_texte = "Fear and Greed : non disponible"
+        fg = "Fear and Greed : non disponible"
     if donnees_avancees:
-        da_texte = (
+        da = (
             "ATH Bitcoin : " + str(int(donnees_avancees.get("ath", 0))) + " USD\n"
-            + "Distance ATH : " + str(donnees_avancees.get("ath_pct", 0)) + "%\n"
-            + "Sentiment CoinGecko : " + str(donnees_avancees.get("sentiment_up", 0)) + "% haussier\n"
-            + "Abonnes Reddit : " + str(donnees_avancees.get("reddit_subscribers", 0)) + "\n"
-            + "Comptes actifs 48h : " + str(donnees_avancees.get("reddit_active", 0)) + "\n"
+            "Distance ATH : " + str(donnees_avancees.get("ath_pct", 0)) + "%\n"
+            "Sentiment : " + str(donnees_avancees.get("sentiment_up", 0)) + "% haussier\n"
         )
     else:
-        da_texte = ""
-    reddit_texte = "Sentiment Reddit : non disponible"
+        da = ""
     if reddit:
-        reddit_texte = (
-            "Sentiment Reddit r/Bitcoin : " + reddit["sentiment"] + "\n"
-            + "Score positif : " + str(reddit["score_pos"]) + " | Score negatif : " + str(reddit["score_neg"]) + "\n"
-            + "Posts analyses : " + str(reddit["total_posts"]) + "\n"
-        )
+        rd = "Sentiment Reddit r/Bitcoin : " + reddit["sentiment"] + "\n"
         if reddit["top_posts"]:
-            reddit_texte = reddit_texte + "Top posts :\n"
             for p in reddit["top_posts"]:
-                reddit_texte = reddit_texte + "- " + p + "\n"
-    trends_texte = "Google Trends : non disponible"
-    if trends:
-        trends_texte = "Google Trends : " + trends["statut"] + "\n"
-    if news:
-        news_texte = ""
-        for i, titre in enumerate(news[:10]):
-            news_texte = news_texte + str(i+1) + ". " + titre + "\n"
+                rd = rd + "- " + p + "\n"
     else:
-        news_texte = "Aucune news disponible."
+        rd = "Sentiment Reddit : non disponible"
+    tr = "Google Trends : non disponible"
+    if trends:
+        tr = "Google Trends : " + trends["statut"]
+    if news:
+        nw = ""
+        for i, titre in enumerate(news[:10]):
+            nw = nw + str(i + 1) + ". " + titre + "\n"
+    else:
+        nw = "Aucune news disponible."
     if contexte == "matin":
-        instruction = "C'est l'analyse du MATIN. Donne une vision de la journee a venir. Opportunites et risques ?"
+        instruction = "Analyse du MATIN. Vision de la journee, opportunites et risques."
     elif contexte == "midi":
-        instruction = "C'est le POINT DU MIDI. Bilan matinee et direction apres-midi."
+        instruction = "POINT DU MIDI. Bilan matinee et direction apres-midi."
     elif contexte == "soir":
-        instruction = "C'est le BILAN DU SOIR. Resume la journee et indications pour demain."
+        instruction = "BILAN DU SOIR. Resume journee et indications pour demain."
     elif contexte == "alerte_mouvement":
-        instruction = "ALERTE URGENTE : mouvement de prix important. Opportunite ou danger ?"
+        instruction = "ALERTE URGENTE mouvement de prix. Opportunite ou danger ?"
     elif contexte == "alerte_news":
-        instruction = "ALERTE URGENTE : news importante detectee. Impact potentiel sur BTC ?"
+        instruction = "ALERTE URGENTE news importante. Impact potentiel sur BTC ?"
     else:
         instruction = "Analyse la situation actuelle de BTC."
-    prompt = (
+    return (
         "Tu es un expert analyste Bitcoin. Nous sommes le "
         + date_str + " a " + heure_paris + " heure de Paris.\n\n"
         + instruction + "\n\n"
-        + "=== PRIX BTC ===\n" + resume_prix + "\n"
-        + "=== FEAR AND GREED ===\n" + fg_texte + "\n\n"
-        + "=== DONNEES MARCHE ===\n" + da_texte + "\n"
-        + "=== SENTIMENT REDDIT ===\n" + reddit_texte + "\n\n"
-        + "=== GOOGLE TRENDS ===\n" + trends_texte + "\n\n"
-        + "=== NEWS CHAUDES ===\n" + news_texte + "\n"
-        + "Reponds EXACTEMENT dans ce format :\n\n"
-        + "CONSEIL : LONG ou SHORT ou ATTENDRE\n"
-        + "CONFIANCE : Faible ou Moyenne ou Forte\n\n"
-        + "CONTEXTE :\n"
-        + "2 phrases sur la situation actuelle\n\n"
-        + "RAISONS :\n"
-        + "- raison 1\n"
-        + "- raison 2\n"
-        + "- raison 3\n\n"
-        + "RISQUES :\n"
-        + "- risque principal\n\n"
-        + "NIVEAUX CLES :\n"
-        + "Support : prix USD\n"
-        + "Resistance : prix USD\n"
-        + "Objectif : prix USD\n"
+        "=== PRIX BTC ===\n" + resume_prix + "\n"
+        "=== FEAR AND GREED ===\n" + fg + "\n\n"
+        "=== DONNEES MARCHE ===\n" + da + "\n"
+        "=== SENTIMENT REDDIT ===\n" + rd + "\n\n"
+        "=== GOOGLE TRENDS ===\n" + tr + "\n\n"
+        "=== NEWS CHAUDES ===\n" + nw + "\n"
+        "Reponds EXACTEMENT dans ce format :\n\n"
+        "CONSEIL : LONG ou SHORT ou ATTENDRE\n"
+        "CONFIANCE : Faible ou Moyenne ou Forte\n\n"
+        "CONTEXTE :\n"
+        "2 phrases sur la situation actuelle\n\n"
+        "RAISONS :\n"
+        "- raison 1\n"
+        "- raison 2\n"
+        "- raison 3\n\n"
+        "RISQUES :\n"
+        "- risque principal\n\n"
+        "NIVEAUX CLES :\n"
+        "Support : prix USD\n"
+        "Resistance : prix USD\n"
+        "Objectif : prix USD\n"
     )
+
+
+def analyser_avec_gemini(prompt):
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -443,7 +427,7 @@ def analyser_avec_gemini(resume_prix, fear_greed, donnees_avancees, news, reddit
     }
     for tentative in range(MAX_RETRY):
         try:
-            print("Gemini tentative " + str(tentative+1) + "/" + str(MAX_RETRY))
+            print("Gemini tentative " + str(tentative + 1))
             r = requests.post(url, json=body, timeout=30)
             data = r.json()
             candidates = data.get("candidates", [])
@@ -451,12 +435,52 @@ def analyser_avec_gemini(resume_prix, fear_greed, donnees_avancees, news, reddit
                 parts = candidates[0].get("content", {}).get("parts", [])
                 if parts:
                     return parts[0].get("text", "").strip()
-            print("Reponse Gemini invalide: " + str(data))
             time.sleep(RETRY_DELAY)
         except Exception as e:
-            print("Erreur Gemini tentative " + str(tentative+1) + ": " + str(e))
+            print("Erreur Gemini tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None
+
+
+def analyser_avec_cohere(prompt):
+    headers = {
+        "Authorization": "Bearer " + COHERE_API_KEY,
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": "command-r",
+        "message": prompt,
+        "temperature": 0.3,
+        "max_tokens": 500,
+    }
+    for tentative in range(MAX_RETRY):
+        try:
+            print("Cohere tentative " + str(tentative + 1))
+            r = requests.post("https://api.cohere.com/v1/chat", headers=headers, json=body, timeout=30)
+            data = r.json()
+            if "text" in data:
+                return data["text"].strip()
+            time.sleep(RETRY_DELAY)
+        except Exception as e:
+            print("Erreur Cohere tentative " + str(tentative + 1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
+    return None
+
+
+def analyser_ia(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte):
+    prompt = construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte)
+    print("Essai Gemini...")
+    analyse = analyser_avec_gemini(prompt)
+    if analyse:
+        print("Gemini OK")
+        return analyse, "Gemini"
+    print("Gemini echoue, essai Cohere...")
+    analyse = analyser_avec_cohere(prompt)
+    if analyse:
+        print("Cohere OK")
+        return analyse, "Cohere"
+    print("Les 2 IA ont echoue")
+    return None, None
 
 
 def label_analyse(contexte, heure_paris):
@@ -470,7 +494,7 @@ def label_analyse(contexte, heure_paris):
     return labels.get(contexte, "ANALYSE BTC - " + heure_paris)
 
 
-def format_message(analyse, actuel, fear_greed, reddit, trends, heure_paris, contexte):
+def format_message(actuel, fear_greed, reddit, trends, heure_paris, contexte, analyse, ia_utilisee):
     s24 = "+" if actuel["var_24h"] >= 0 else ""
     s7 = "+" if actuel["var_7d"] >= 0 else ""
     fg_line = ""
@@ -484,17 +508,18 @@ def format_message(analyse, actuel, fear_greed, reddit, trends, heure_paris, con
         trends_line = "Google     : Bitcoin en tendance\n"
     return (
         "================================\n"
-        + "  " + label_analyse(contexte, heure_paris) + "\n"
-        + "================================\n"
-        + "Prix : " + str(actuel["prix"]) + " USD\n"
-        + "24H  : " + s24 + str(actuel["var_24h"]) + "%\n"
-        + "7J   : " + s7 + str(actuel["var_7d"]) + "%\n"
+        "  " + label_analyse(contexte, heure_paris) + "\n"
+        "================================\n"
+        "Prix : " + str(actuel["prix"]) + " USD\n"
+        "24H  : " + s24 + str(actuel["var_24h"]) + "%\n"
+        "7J   : " + s7 + str(actuel["var_7d"]) + "%\n"
         + fg_line + reddit_line + trends_line
-        + "--------------------------------\n"
+        + "IA   : " + ia_utilisee + "\n"
+        "--------------------------------\n"
         + analyse
         + "\n--------------------------------\n"
-        + "Pas un conseil financier\n"
-        + "================================"
+        "Pas un conseil financier\n"
+        "================================"
     )
 
 
@@ -518,58 +543,56 @@ def lancer_analyse(contexte, heure_paris):
     print("[" + datetime.utcnow().strftime("%H:%M") + " UTC] Analyse " + contexte + "...")
     d = collecter_donnees()
     if d is None:
-        print("Erreur donnees")
         send_telegram(
             "================================\n"
-            + "  ERREUR DONNEES - " + heure_paris + "\n"
-            + "================================\n"
-            + "Impossible de recuperer les donnees.\n"
-            + "Nouvelle tentative dans 30 min.\n"
-            + "================================"
+            "  ERREUR DONNEES - " + heure_paris + "\n"
+            "================================\n"
+            "Impossible de recuperer les donnees.\n"
+            "Nouvelle tentative dans 30 min.\n"
+            "================================"
         )
         return False
-    analyse = analyser_avec_gemini(
+    analyse, ia = analyser_ia(
         d["resume_prix"], d["fear_greed"], d["donnees_avancees"],
         d["news"], d["reddit"], d["trends"], heure_paris, contexte
     )
     if analyse is None:
         send_telegram(
             "================================\n"
-            + "  ERREUR GEMINI - " + heure_paris + "\n"
-            + "================================\n"
-            + "Prix BTC : " + str(d["actuel"]["prix"]) + " USD\n"
-            + "Gemini indisponible apres " + str(MAX_RETRY) + " tentatives.\n"
-            + "Prochaine analyse prevue normalement.\n"
-            + "================================"
+            "  ERREUR IA - " + heure_paris + "\n"
+            "================================\n"
+            "Prix BTC : " + str(d["actuel"]["prix"]) + " USD\n"
+            "Gemini et Cohere indisponibles.\n"
+            "Prochaine analyse prevue.\n"
+            "================================"
         )
         return False
-    msg = format_message(analyse, d["actuel"], d["fear_greed"], d["reddit"], d["trends"], heure_paris, contexte)
+    msg = format_message(
+        d["actuel"], d["fear_greed"], d["reddit"], d["trends"],
+        heure_paris, contexte, analyse, ia
+    )
     send_telegram(msg)
-    print("Analyse " + contexte + " envoyee.")
+    print("Analyse " + contexte + " envoyee via " + ia)
     return True
 
 
 def run():
-    print("Bot BTC V3 avec retry demarre")
+    print("Bot BTC V4 Gemini+Cohere demarre")
     send_telegram(
         "================================\n"
-        + "  BOT BTC INTELLIGENT V3\n"
-        + "================================\n"
-        + "IA      : Google Gemini gratuit\n"
-        + "Sources : Prix + Volume\n"
-        + "          Fear and Greed\n"
-        + "          News CoinGecko\n"
-        + "          News Cointelegraph\n"
-        + "          News CoinDesk\n"
-        + "          Reddit r/Bitcoin\n"
-        + "          Google Trends\n"
-        + "Analyses: 8h / 13h / 20h Paris\n"
-        + "Alertes : Mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
-        + "          News importantes\n"
-        + "Retry   : " + str(MAX_RETRY) + " tentatives si erreur\n"
-        + "Pause WE: OUI\n"
-        + "================================\n"
-        + "Demarrage dans 1 minute..."
+        "  BOT BTC INTELLIGENT V4\n"
+        "================================\n"
+        "IA 1    : Google Gemini\n"
+        "IA 2    : Cohere (secours)\n"
+        "Sources : Prix, Fear&Greed\n"
+        "          News x3, Reddit\n"
+        "          Google Trends\n"
+        "Analyses: 8h / 13h / 20h Paris\n"
+        "Alertes : Mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
+        "          News importantes\n"
+        "Pause WE: OUI\n"
+        "================================\n"
+        "Demarrage dans 1 minute..."
     )
     weekend_notified = False
     analyses_faites = set()
@@ -586,10 +609,10 @@ def run():
             if not weekend_notified:
                 send_telegram(
                     "================================\n"
-                    + "  BOT EN PAUSE - WEEKEND\n"
-                    + "================================\n"
-                    + "Reprise automatique lundi 7h.\n"
-                    + "================================"
+                    "  BOT EN PAUSE - WEEKEND\n"
+                    "================================\n"
+                    "Reprise automatique lundi 7h.\n"
+                    "================================"
                 )
                 weekend_notified = True
                 analyses_faites = set()
@@ -630,18 +653,18 @@ def run():
                 if dernier_prix is not None:
                     var = round((actuel["prix"] - dernier_prix) / dernier_prix * 100, 2)
                     if abs(var) >= SEUIL_MOUVEMENT:
-                        s = "+" if var >= 0 else ""
+                        sv = "+" if var >= 0 else ""
                         direction = "HAUSSE" if var > 0 else "BAISSE"
                         send_telegram(
                             "================================\n"
-                            + "  ALERTE MOUVEMENT BTC !\n"
-                            + "================================\n"
-                            + "Prix : " + str(actuel["prix"]) + " USD\n"
-                            + "Variation : " + s + str(var) + "%\n"
-                            + "Direction : " + direction + "\n"
-                            + "================================\n"
-                            + "Analyse complete en cours...\n"
-                            + "================================"
+                            "  ALERTE MOUVEMENT BTC\n"
+                            "================================\n"
+                            "Prix : " + str(actuel["prix"]) + " USD\n"
+                            "Variation : " + sv + str(var) + "%\n"
+                            "Direction : " + direction + "\n"
+                            "================================\n"
+                            "Analyse en cours...\n"
+                            "================================"
                         )
                         time.sleep(5)
                         lancer_analyse("alerte_mouvement", heure_paris)
@@ -654,12 +677,12 @@ def run():
                     news_vues.clear()
                 send_telegram(
                     "================================\n"
-                    + "  ALERTE NEWS IMPORTANTE !\n"
-                    + "================================\n"
-                    + "NEWS : " + titre_urgent[:200] + "\n"
-                    + "================================\n"
-                    + "Analyse complete en cours...\n"
-                    + "================================"
+                    "  ALERTE NEWS IMPORTANTE\n"
+                    "================================\n"
+                    "NEWS : " + titre_urgent[:200] + "\n"
+                    "================================\n"
+                    "Analyse en cours...\n"
+                    "================================"
                 )
                 time.sleep(5)
                 lancer_analyse("alerte_news", heure_paris)
