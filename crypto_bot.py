@@ -499,23 +499,32 @@ def analyser_avec_cohere(prompt):
         "Content-Type": "application/json",
     }
     body = {
-        "model": "command-r",
-        "message": prompt,
+        "model": "command-r-plus",
+        "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
         "max_tokens": 700,
     }
     for tentative in range(MAX_RETRY):
         try:
             print("Cohere tentative " + str(tentative + 1))
-            r = requests.post("https://api.cohere.com/v1/chat", headers=headers, json=body, timeout=30)
+            r = requests.post(
+                "https://api.cohere.com/v2/chat",
+                headers=headers,
+                json=body,
+                timeout=30
+            )
             data = r.json()
-            if "text" in data:
-                return data["text"].strip()
+            print("Cohere reponse: " + str(data)[:200])
+            message = data.get("message", {})
+            content = message.get("content", [])
+            if content and len(content) > 0:
+                return content[0].get("text", "").strip()
             time.sleep(RETRY_DELAY)
         except Exception as e:
             print("Erreur Cohere tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None
+
 
 
 def analyser_avec_openrouter(prompt):
