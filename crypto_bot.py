@@ -360,7 +360,7 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
     date_str = datetime.utcnow().strftime("%d/%m/%Y")
     if fear_greed:
         fg = (
-            "Indice Fear and Greed actuel : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
+            "Fear and Greed actuel : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
             "Hier : " + str(fear_greed["hier"]) + "/100\n"
             "Avant-hier : " + str(fear_greed["avant_hier"]) + "/100"
         )
@@ -369,8 +369,8 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
     if donnees_avancees:
         da = (
             "ATH Bitcoin : " + str(int(donnees_avancees.get("ath", 0))) + " USD\n"
-            "Distance de l ATH : " + str(donnees_avancees.get("ath_pct", 0)) + "%\n"
-            "Sentiment communaute : " + str(donnees_avancees.get("sentiment_up", 0)) + "% haussier\n"
+            "Distance ATH : " + str(donnees_avancees.get("ath_pct", 0)) + "%\n"
+            "Sentiment : " + str(donnees_avancees.get("sentiment_up", 0)) + "% haussier\n"
         )
     else:
         da = ""
@@ -392,80 +392,47 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
     else:
         nw = "Aucune news disponible."
     if contexte == "matin":
-        instruction = (
-            "C est l analyse du MATIN. Tu dois :\n"
-            "1. Resumer ce qui s est passe la nuit sur BTC\n"
-            "2. Donner une vision claire de la journee a venir\n"
-            "3. Identifier les opportunites et les risques\n"
-            "4. Conseiller sur la direction a prendre aujourd hui"
-        )
+        instruction = "Analyse du MATIN. Resume la nuit, vision de la journee, opportunites et risques."
     elif contexte == "midi":
-        instruction = (
-            "C est le POINT DU MIDI. Tu dois :\n"
-            "1. Faire le bilan de la matinee\n"
-            "2. Analyser si la tendance du matin se confirme\n"
-            "3. Donner une direction pour l apres-midi\n"
-            "4. Identifier les niveaux cles a surveiller"
-        )
+        instruction = "POINT DU MIDI. Bilan matinee, confirme ou infirme la tendance du matin, direction apres-midi."
     elif contexte == "soir":
-        instruction = (
-            "C est le BILAN DU SOIR. Tu dois :\n"
-            "1. Resumer la journee complete sur BTC\n"
-            "2. Analyser les evenements marquants du jour\n"
-            "3. Donner une vision pour demain\n"
-            "4. Conseiller sur les positions a maintenir ou fermer"
-        )
+        instruction = "BILAN DU SOIR. Resume la journee complete, evenements marquants, vision pour demain."
     elif contexte == "alerte_mouvement":
-        instruction = (
-            "ALERTE URGENTE : un mouvement important vient d etre detecte sur BTC.\n"
-            "Tu dois analyser immediatement :\n"
-            "1. La nature et la force de ce mouvement\n"
-            "2. Si c est une opportunite d entrer ou de sortir\n"
-            "3. Les niveaux cles a surveiller maintenant\n"
-            "4. Le risque associe a ce mouvement"
-        )
+        instruction = "ALERTE URGENTE mouvement important detecte. Analyser la nature, opportunite ou danger, que faire maintenant."
     elif contexte == "alerte_news":
-        instruction = (
-            "ALERTE URGENTE : une news importante vient d etre detectee.\n"
-            "Tu dois analyser immediatement :\n"
-            "1. L impact potentiel de cette news sur BTC\n"
-            "2. Si c est positif ou negatif pour le prix\n"
-            "3. La reaction probable du marche\n"
-            "4. Ce qu il faut faire maintenant"
-        )
+        instruction = "ALERTE URGENTE news importante. Impact sur BTC, positif ou negatif, reaction du marche probable."
     else:
-        instruction = "Analyse la situation actuelle de BTC de facon complete."
-
+        instruction = "Analyse complete de la situation actuelle de BTC."
     return (
-        "Tu es un expert analyste Bitcoin reconnu, tu reponds UNIQUEMENT en francais.\n"
+        "Tu es un expert analyste Bitcoin. Reponds UNIQUEMENT en francais.\n"
         "Nous sommes le " + date_str + " a " + heure_paris + " heure de Paris.\n\n"
         + instruction + "\n\n"
-        "=== DONNEES DE PRIX BTC ===\n" + resume_prix + "\n"
-        "=== INDICE FEAR AND GREED ===\n" + fg + "\n\n"
+        "=== PRIX BTC ===\n" + resume_prix + "\n"
+        "=== FEAR AND GREED ===\n" + fg + "\n\n"
         "=== DONNEES MARCHE ===\n" + da + "\n"
-        "=== SENTIMENT REDDIT r/Bitcoin ===\n" + rd + "\n\n"
+        "=== SENTIMENT REDDIT ===\n" + rd + "\n\n"
         "=== GOOGLE TRENDS ===\n" + tr + "\n\n"
-        "=== ACTUALITES CHAUDES (traduis-les en francais) ===\n" + nw + "\n"
-        "Reponds UNIQUEMENT en francais et EXACTEMENT dans ce format :\n\n"
+        "=== ACTUALITES (traduis en francais) ===\n" + nw + "\n"
+        "Reponds UNIQUEMENT en francais dans ce format exact :\n\n"
         "CONSEIL : LONG ou SHORT ou ATTENDRE\n"
         "CONFIANCE : Faible ou Moyenne ou Forte\n\n"
         "RESUME DE LA SITUATION :\n"
-        "3 phrases maximum en francais sur la situation actuelle de BTC\n\n"
+        "3 phrases en francais sur la situation actuelle\n\n"
         "ACTUALITES DU MOMENT :\n"
-        "- actualite 1 traduite en francais et resumee\n"
-        "- actualite 2 traduite en francais et resumee\n"
-        "- actualite 3 traduite en francais et resumee\n\n"
+        "- actualite 1 en francais\n"
+        "- actualite 2 en francais\n"
+        "- actualite 3 en francais\n\n"
         "RAISONS DU CONSEIL :\n"
         "- raison 1\n"
         "- raison 2\n"
         "- raison 3\n\n"
         "RISQUES A SURVEILLER :\n"
-        "- risque principal\n"
-        "- risque secondaire\n\n"
+        "- risque 1\n"
+        "- risque 2\n\n"
         "NIVEAUX CLES :\n"
-        "Support    : prix en USD\n"
-        "Resistance : prix en USD\n"
-        "Objectif   : prix en USD si LONG ou SHORT\n\n"
+        "Support    : prix USD\n"
+        "Resistance : prix USD\n"
+        "Objectif   : prix USD\n\n"
         "SENTIMENT GLOBAL : Haussier ou Baissier ou Neutre\n"
     )
 
@@ -484,8 +451,9 @@ def analyser_avec_gemini(prompt):
             candidates = data.get("candidates", [])
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
-                if parts:
+                if parts and parts[0].get("text", ""):
                     return parts[0].get("text", "").strip()
+            print("Gemini reponse invalide: " + str(data)[:150])
             time.sleep(RETRY_DELAY)
         except Exception as e:
             print("Erreur Gemini tentative " + str(tentative + 1) + ": " + str(e))
@@ -499,7 +467,7 @@ def analyser_avec_cohere(prompt):
         "Content-Type": "application/json",
     }
     body = {
-        "model": "command-r-plus",
+        "model": "command-a-03-2025",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
         "max_tokens": 700,
@@ -507,24 +475,20 @@ def analyser_avec_cohere(prompt):
     for tentative in range(MAX_RETRY):
         try:
             print("Cohere tentative " + str(tentative + 1))
-            r = requests.post(
-                "https://api.cohere.com/v2/chat",
-                headers=headers,
-                json=body,
-                timeout=30
-            )
+            r = requests.post("https://api.cohere.com/v2/chat", headers=headers, json=body, timeout=30)
             data = r.json()
-            print("Cohere reponse: " + str(data)[:200])
+            print("Cohere reponse: " + str(data)[:100])
             message = data.get("message", {})
             content = message.get("content", [])
             if content and len(content) > 0:
-                return content[0].get("text", "").strip()
+                text = content[0].get("text", "").strip()
+                if text and len(text) > 10:
+                    return text
             time.sleep(RETRY_DELAY)
         except Exception as e:
             print("Erreur Cohere tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None
-
 
 
 def analyser_avec_openrouter(prompt):
@@ -535,7 +499,7 @@ def analyser_avec_openrouter(prompt):
         "X-Title": "CryptoBotBTC",
     }
     body = {
-        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "model": "mistralai/mistral-7b-instruct:free",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
         "max_tokens": 700,
@@ -545,10 +509,11 @@ def analyser_avec_openrouter(prompt):
             print("OpenRouter tentative " + str(tentative + 1))
             r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body, timeout=30)
             data = r.json()
+            print("OpenRouter reponse: " + str(data)[:150])
             choices = data.get("choices", [])
-            if choices:
+            if choices and len(choices) > 0:
                 content = choices[0].get("message", {}).get("content", "")
-                if content:
+                if content and len(content) > 10:
                     return content.strip()
             time.sleep(RETRY_DELAY)
         except Exception as e:
@@ -677,8 +642,8 @@ def run():
         "  BOT BTC INTELLIGENT V5\n"
         "================================\n"
         "IA 1    : Google Gemini\n"
-        "IA 2    : Cohere (secours)\n"
-        "IA 3    : OpenRouter Llama (secours)\n"
+        "IA 2    : Cohere command-a\n"
+        "IA 3    : OpenRouter Mistral\n"
         "Prix    : Binance + CoinGecko\n"
         "Sources : Fear&Greed, News x3\n"
         "          Reddit, Google Trends\n"
