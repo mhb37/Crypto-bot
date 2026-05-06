@@ -2,13 +2,13 @@ import requests
 import time
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 TELEGRAM_TOKEN = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 COHERE_API_KEY = os.environ.get("COHERE_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+PHANTOM_WALLET = "AVELFh7k13hounRzxbV1QczpaPAR4VtjEYw68LPBUrU5"
 
 PAUSE_WEEKEND = True
 HEURE_DEBUT = 5
@@ -35,6 +35,10 @@ MOTS_NEGATIFS_REDDIT = [
     "fear", "panic", "drop", "fall", "resistance", "bubble", "scam"
 ]
 
+# Journal des trades conseilles
+journal_trades = []
+position_en_cours = None
+
 
 def send_telegram(message):
     url = "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/sendMessage"
@@ -54,6 +58,219 @@ def is_weekend():
 def is_heure_creuse():
     h = datetime.utcnow().hour
     return h < HEURE_DEBUT or h >= HEURE_FIN
+
+
+def get_solana_balance():
+    try:
+        url = "https://api.mainnet-beta.solana.com"
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getBalance",
+            "params": [PHANTOM_WALLET]
+        }
+        r = requests.post(url, json=body, timeout=10)
+        data = r.json()
+        lamports = data.get("result", {}).get("value", 0)
+        sol = round(lamports / 1e9, 4)
+        return sol
+    except Exception as e:
+        print("Erreur Solana balance: " + str(e))
+        return None
+
+
+def get_sol_price():
+    try:
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+            timeout=10
+        )
+        data = r.json()
+        return data.get("solana", {}).get("usd", 0)
+    except:
+        return 0
+
+
+def get_wallet_info():
+    sol = get_solana_balance()
+    sol_price = get_sol_price()
+    if sol is not None:
+        valeur_usd = round(sol * sol_price, 2)
+        return {
+            "sol": sol,
+            "sol_price": sol_price,
+            "valeur_usd": valeur_usd,
+        }
+    return None
+
+
+def verifier_tp_sl(prix_actuel):
+    global position_en_cours, journal_trades
+    if not position_en_cours:
+        return None
+
+    direction = position_en_cours.get("direction", "")
+    tp1 = position_en_cours.get("tp1", 0)
+    tp2 = position_en_cours.get("tp2", 0)
+    sl = position_en_cours.get("sl", 0)
+    prix_entree = position_en_cours.get("prix_entree", 0)
+    heure_entree = position_en_cours.get("heure", "")
+
+    message = None
+    resultat = None
+    pct = 0
+
+    if direction == "LONG":
+        if prix_actuel >= tp2 and tp2 > 0:
+            pct = round((prix_actuel - prix_entree) / prix_entree * 100, 2)
+            resultat = "GAGNANT"
+            message = (
+                "🎯 TP2 ATTEINT - LONG GAGNE\n"
+                "\n"
+                "💰 Prix entree : " + str(prix_entree) + " USD\n"
+                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
+                "📈 Gain : +" + str(pct) + "%\n"
+                "⏰ Ouvert a : " + heure_entree + "\n"
+                "\n"
+                "Fermer la position et prendre les profits !"
+            )
+        elif prix_actuel >= tp1 and tp1 > 0 and not position_en_cours.get("tp1_atteint"):
+            pct = round((prix_actuel - prix_entree) / prix_entree * 100, 2)
+            position_en_cours["tp1_atteint"] = True
+            message = (
+                "🎯 TP1 ATTEINT - LONG EN PROFIT\n"
+                "\n"
+                "💰 Prix entree : " + str(prix_entree) + " USD\n"
+                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
+                "📈 Profit actuel : +" + str(pct) + "%\n"
+                "\n"
+                "Securiser une partie des profits.\n"
+                "Laisser courir vers TP2 : " + str(tp2) + " USD"
+            )
+        elif sl > 0 and prix_actuel <= sl:
+            pct = round((prix_actuel - prix_entree) / prix_entree * 100, 2)
+            resultat = "PERDANT"
+            message = (
+                "🛑 STOP LOSS DECLENCHE - LONG PERD\n"
+                "\n"
+                "💰 Prix entree : " + str(prix_entree) + " USD\n"
+                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
+                "📉 Perte : " + str(pct) + "%\n"
+                "⏰ Ouvert a : " + heure_entree + "\n"
+                "\n"
+                "Fermer la position immediatement !"
+            )
+
+    elif direction == "SHORT":
+        if tp2 > 0 and prix_actuel <= tp2:
+            pct = round((prix_entree - prix_actuel) / prix_entree * 100, 2)
+            resultat = "GAGNANT"
+            message = (
+                "🎯 TP2 ATTEINT - SHORT GAGNE\n"
+                "\n"
+                "💰 Prix entree : " + str(prix_entree) + " USD\n"
+                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
+                "📈 Gain : +" + str(pct) + "%\n"
+                "⏰ Ouvert a : " + heure_entree + "\n"
+                "\n"
+                "Fermer la position et prendre les profits !"
+            )
+        elif tp1 > 0 and prix_actuel <= tp1 and not position_en_cours.get("tp1_atteint"):
+            pct = round((prix_entree - prix_actuel) / prix_entree * 100, 2)
+            position_en_cours["tp1_atteint"] = True
+            message = (
+                "🎯 TP1 ATTEINT - SHORT EN PROFIT\n"
+                "\n"
+                "💰 Prix entree : " + str(prix_entree) + " USD\n"
+                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
+                "📈 Profit actuel : +" + str(pct) + "%\n"
+                "\n"
+                "Securiser une partie des profits.\n"
+                "Laisser courir vers TP2 : " + str(tp2) + " USD"
+            )
+        elif sl > 0 and prix_actuel >= sl:
+            pct = round((prix_entree - prix_actuel) / prix_entree * 100, 2)
+            resultat = "PERDANT"
+            message = (
+                "🛑 STOP LOSS DECLENCHE - SHORT PERD\n"
+                "\n"
+                "💰 Prix entree : " + str(prix_entree) + " USD\n"
+                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
+                "📉 Perte : " + str(pct) + "%\n"
+                "⏰ Ouvert a : " + heure_entree + "\n"
+                "\n"
+                "Fermer la position immediatement !"
+            )
+
+    if resultat:
+        journal_trades.append({
+            "direction": direction,
+            "prix_entree": prix_entree,
+            "prix_sortie": prix_actuel,
+            "pct": pct,
+            "resultat": resultat,
+            "heure": datetime.utcnow().strftime("%d/%m %H:%M"),
+        })
+        position_en_cours = None
+
+    return message
+
+
+def enregistrer_position(direction, prix_entree, tp1, tp2, sl):
+    global position_en_cours
+    if direction in ("LONG", "SHORT"):
+        position_en_cours = {
+            "direction": direction,
+            "prix_entree": prix_entree,
+            "tp1": tp1,
+            "tp2": tp2,
+            "sl": sl,
+            "tp1_atteint": False,
+            "heure": datetime.utcnow().strftime("%d/%m %H:%M UTC"),
+        }
+        print("Position enregistree: " + direction + " a " + str(prix_entree))
+
+
+def reporting_soir():
+    global journal_trades
+    now = datetime.utcnow().strftime("%d/%m/%Y")
+    msg = (
+        "📊 REPORTING DU SOIR - " + now + "\n"
+        "─────────────────────────\n"
+    )
+
+    if not journal_trades:
+        msg = msg + "Aucun trade ferme aujourd hui.\n"
+    else:
+        total = len(journal_trades)
+        gagnants = [t for t in journal_trades if t["resultat"] == "GAGNANT"]
+        perdants = [t for t in journal_trades if t["resultat"] == "PERDANT"]
+        pct_moyen = round(sum(t["pct"] for t in journal_trades) / total, 2)
+        taux_reussite = round(len(gagnants) / total * 100, 0)
+
+        msg = msg + "Trades fermes : " + str(total) + "\n"
+        msg = msg + "Gagnants : " + str(len(gagnants)) + " ✅\n"
+        msg = msg + "Perdants : " + str(len(perdants)) + " ❌\n"
+        msg = msg + "Taux de reussite : " + str(taux_reussite) + "%\n"
+        msg = msg + "Gain/Perte moyen : " + ("+" if pct_moyen >= 0 else "") + str(pct_moyen) + "%\n"
+        msg = msg + "\n"
+        msg = msg + "Detail des trades :\n"
+        for t in journal_trades:
+            emoji = "✅" if t["resultat"] == "GAGNANT" else "❌"
+            s = "+" if t["pct"] >= 0 else ""
+            msg = msg + emoji + " " + t["direction"] + " " + s + str(t["pct"]) + "% (" + t["heure"] + ")\n"
+
+    if position_en_cours:
+        msg = msg + (
+            "\n"
+            "Position en cours :\n"
+            "📍 " + position_en_cours["direction"] + " ouvert a " + str(position_en_cours["prix_entree"]) + " USD\n"
+            "Depuis : " + position_en_cours["heure"] + "\n"
+        )
+
+    msg = msg + "─────────────────────────\n"
+    msg = msg + "⚠️ Pas un conseil financier"
+    return msg
 
 
 def get_historique_btc():
@@ -134,7 +351,6 @@ def get_donnees_avancees():
                 "ath_pct": round(md.get("ath_change_percentage", {}).get("usd", 0), 1),
                 "sentiment_up": data.get("sentiment_votes_up_percentage", 0),
                 "reddit_subscribers": cd.get("reddit_subscribers", 0),
-                "reddit_active": cd.get("reddit_active_accounts_48h", 0),
             }
         except Exception as e:
             print("Erreur donnees avancees tentative " + str(tentative + 1) + ": " + str(e))
@@ -178,10 +394,10 @@ def get_news_btc():
         print("Erreur CoinGecko news: " + str(e))
     try:
         url = "https://api.rss2json.com/v1/api.json"
-        params = {"rss_url": "https://cointelegraph.com/rss/tag/bitcoin", "count": "10"}
+        params = {"rss_url": "https://cointelegraph.com/rss/tag/bitcoin", "count": "15"}
         r = requests.get(url, params=params, timeout=10)
         data = r.json()
-        for item in data.get("items", [])[:10]:
+        for item in data.get("items", [])[:15]:
             titre = item.get("title", "")
             if titre and titre not in titres:
                 titres.append(titre)
@@ -189,10 +405,10 @@ def get_news_btc():
         print("Erreur Cointelegraph: " + str(e))
     try:
         url = "https://api.rss2json.com/v1/api.json"
-        params = {"rss_url": "https://www.coindesk.com/arc/outboundfeeds/rss/", "count": "10"}
+        params = {"rss_url": "https://www.coindesk.com/arc/outboundfeeds/rss/", "count": "15"}
         r = requests.get(url, params=params, timeout=10)
         data = r.json()
-        for item in data.get("items", [])[:10]:
+        for item in data.get("items", [])[:15]:
             titre = item.get("title", "")
             if titre and titre not in titres:
                 t = titre.lower()
@@ -201,7 +417,7 @@ def get_news_btc():
     except Exception as e:
         print("Erreur CoinDesk: " + str(e))
     print("News recuperees: " + str(len(titres)))
-    return titres[:15]
+    return titres[:20]
 
 
 def get_reddit_sentiment():
@@ -242,7 +458,6 @@ def get_reddit_sentiment():
                 "sentiment": sentiment,
                 "score_pos": score_pos,
                 "score_neg": score_neg,
-                "score_net": score_net,
                 "top_posts": titres_reddit[:3],
                 "total_posts": len(posts),
             }
@@ -356,8 +571,9 @@ def preparer_resume_prix(prices, volumes, actuel):
     )
 
 
-def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte):
+def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info):
     date_str = datetime.utcnow().strftime("%d/%m/%Y")
+
     if fear_greed:
         fg = (
             "Fear and Greed actuel : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
@@ -366,6 +582,7 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
         )
     else:
         fg = "Fear and Greed : non disponible"
+
     if donnees_avancees:
         da = (
             "ATH Bitcoin : " + str(int(donnees_avancees.get("ath", 0))) + " USD\n"
@@ -374,6 +591,7 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
         )
     else:
         da = ""
+
     if reddit:
         rd = "Sentiment Reddit r/Bitcoin : " + reddit["sentiment"] + "\n"
         if reddit["top_posts"]:
@@ -382,120 +600,179 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
                 rd = rd + "- " + p + "\n"
     else:
         rd = "Sentiment Reddit : non disponible"
+
     tr = "Google Trends : non disponible"
     if trends:
         tr = "Google Trends : " + trends["statut"]
+
     if news:
         nw = ""
-        for i, titre in enumerate(news[:10]):
+        for i, titre in enumerate(news[:15]):
             nw = nw + str(i + 1) + ". " + titre + "\n"
     else:
         nw = "Aucune news disponible."
+
+    pos_info = "Aucune position ouverte actuellement."
+    if position_en_cours:
+        pos_info = (
+            "POSITION EN COURS : " + position_en_cours["direction"] + "\n"
+            "Prix d entree : " + str(position_en_cours["prix_entree"]) + " USD\n"
+            "TP1 : " + str(position_en_cours["tp1"]) + " USD\n"
+            "TP2 : " + str(position_en_cours["tp2"]) + " USD\n"
+            "SL  : " + str(position_en_cours["sl"]) + " USD\n"
+            "Ouverte a : " + position_en_cours["heure"] + "\n"
+            "IMPORTANT : Ne pas ouvrir une nouvelle position tant que celle-ci est active !"
+        )
+
+    wallet_txt = "Portefeuille non disponible"
+    if wallet_info:
+        wallet_txt = (
+            "Solana (SOL) : " + str(wallet_info["sol"]) + " SOL\n"
+            "Prix SOL     : " + str(wallet_info["sol_price"]) + " USD\n"
+            "Valeur USD   : " + str(wallet_info["valeur_usd"]) + " USD\n"
+        )
+
     if contexte == "matin":
         instruction = (
-            "C est l analyse du MATIN. Tu dois etre PROACTIF et DIRECT.\n"
-            "1. Donne la METEO DU MARCHE pour aujourd hui\n"
+            "Analyse du MATIN tres detaillee. Sois PROACTIF.\n"
+            "Analyse les news du jour ET d hier avant de decider.\n"
+            "1. Donne la METEO DU MARCHE\n"
             "2. Donne un SCORE DE RISQUE de 1 a 10\n"
-            "3. Dis quel pourcentage du capital deployer aujourd hui\n"
-            "4. Donne un PLAN D ACTION concret pour la journee\n"
-            "5. Si tu conseilles LONG ou SHORT, donne les prix EXACTS d entree, TP et SL"
+            "3. Dis quel pourcentage du capital deployer\n"
+            "4. Si position en cours, faut-il la garder ou la fermer ?\n"
+            "5. Si pas de position, y a-t-il une opportunite claire ?\n"
+            "6. Donne un plan d action PRECIS pour la journee"
         )
     elif contexte == "midi":
         instruction = (
-            "C est le POINT DU MIDI. Sois PROACTIF.\n"
+            "POINT DU MIDI. Sois COHERENT avec la position en cours.\n"
             "1. La tendance du matin se confirme-t-elle ?\n"
-            "2. Faut-il ajuster les positions ouvertes ?\n"
-            "3. Donne un plan d action precis pour l apres-midi\n"
-            "4. Y a-t-il de nouvelles opportunites a saisir ?"
+            "2. La position en cours est-elle toujours valide ?\n"
+            "3. Faut-il ajuster le SL pour securiser les profits ?\n"
+            "4. NE PAS proposer une nouvelle entree si position deja ouverte"
         )
     elif contexte == "soir":
         instruction = (
-            "C est le BILAN DU SOIR. Sois PROACTIF.\n"
+            "BILAN DU SOIR. Sois COHERENT.\n"
             "1. Bilan complet de la journee\n"
-            "2. Faut-il garder les positions ou les fermer pour la nuit ?\n"
+            "2. La position en cours : garder pour la nuit ou fermer ?\n"
             "3. Que surveiller cette nuit ?\n"
-            "4. Preparation pour demain matin"
+            "4. Preparation pour demain"
         )
     elif contexte == "alerte_mouvement":
         instruction = (
-            "ALERTE URGENTE mouvement detecte. Sois IMMEDIAT et DECISIF.\n"
-            "1. Ce mouvement est-il une opportunite ou un danger ?\n"
-            "2. Faut-il agir MAINTENANT ?\n"
-            "3. Si oui, donne les prix EXACTS d entree, TP et SL\n"
-            "4. Quel est le risque si on n agit pas ?"
+            "ALERTE MOUVEMENT. Sois IMMEDIAT.\n"
+            "1. Ce mouvement impacte-t-il la position en cours ?\n"
+            "2. Faut-il fermer, ajuster le SL ou laisser courir ?\n"
+            "3. NE PAS ouvrir une nouvelle position si une est deja ouverte\n"
+            "4. Si pas de position, est-ce le bon moment d entrer ?"
         )
     elif contexte == "alerte_news":
         instruction = (
-            "ALERTE URGENTE news importante. Sois IMMEDIAT et DECISIF.\n"
-            "1. Impact direct de cette news sur le prix de BTC\n"
-            "2. Le marche va-t-il monter ou baisser ?\n"
-            "3. Que faire dans les 30 prochaines minutes ?\n"
-            "4. Cette news change-t-elle la tendance du jour ?"
+            "ALERTE NEWS. Sois IMMEDIAT et COHERENT.\n"
+            "1. Cette news change-t-elle la these de la position en cours ?\n"
+            "2. Faut-il agir sur la position existante ?\n"
+            "3. NE PAS proposer de nouvelle entree si position ouverte\n"
+            "4. Impact direct sur le prix dans les prochaines heures ?"
         )
     else:
         instruction = "Analyse complete et proactive de BTC."
 
     return (
         "Tu es un trader Bitcoin expert et PROACTIF. Tu reponds UNIQUEMENT en francais.\n"
-        "Tu ne te contentes pas d analyser, tu PRENDS DES DECISIONS et tu DONNES DES ORDRES CLAIRS.\n"
+        "Tu es COHERENT : tu ne proposes jamais une nouvelle position si une est deja ouverte.\n"
+        "Tu analyses les news du jour ET de la veille avant de decider.\n"
         "Nous sommes le " + date_str + " a " + heure_paris + " heure de Paris.\n\n"
         + instruction + "\n\n"
+        "=== POSITION EN COURS ===\n" + pos_info + "\n\n"
+        "=== PORTEFEUILLE PHANTOM ===\n" + wallet_txt + "\n\n"
         "=== PRIX BTC ===\n" + resume_prix + "\n"
         "=== FEAR AND GREED ===\n" + fg + "\n\n"
         "=== DONNEES MARCHE ===\n" + da + "\n"
         "=== SENTIMENT REDDIT ===\n" + rd + "\n\n"
         "=== GOOGLE TRENDS ===\n" + tr + "\n\n"
-        "=== ACTUALITES (traduis en francais) ===\n" + nw + "\n"
+        "=== ACTUALITES DU JOUR ET VEILLE (traduis en francais) ===\n" + nw + "\n"
         "Reponds UNIQUEMENT en francais dans ce format EXACT :\n\n"
-        "METEO : [emoji soleil/nuage/orage] [Favorable / Mitige / Dangereux]\n"
+        "METEO : [emoji] [Favorable / Mitige / Dangereux]\n"
         "SCORE DE RISQUE : [1-10]/10\n"
-        "CAPITAL A DEPLOYER : [pourcentage]% de ton capital\n\n"
-        "CONSEIL : [LONG / SHORT / ATTENDRE]\n"
+        "CAPITAL A DEPLOYER : [pourcentage]%\n\n"
+        "POSITION EN COURS : [Garder / Fermer / Ajuster SL] ou [Aucune]\n\n"
+        "CONSEIL : [LONG / SHORT / ATTENDRE / MAINTENIR POSITION]\n"
         "CONVICTION : [1-10]/10\n\n"
         "PLAN D ACTION :\n"
-        "- Action 1 precise\n"
-        "- Action 2 precise\n"
-        "- Action 3 precise\n\n"
-        "SI LONG OU SHORT :\n"
-        "Entre a  : prix USD\n"
-        "TP1      : prix USD\n"
-        "TP2      : prix USD\n"
-        "Stop Loss: prix USD\n\n"
+        "- Action 1\n"
+        "- Action 2\n"
+        "- Action 3\n\n"
+        "SI NOUVELLE ENTREE SEULEMENT :\n"
+        "Entre a   : prix USD\n"
+        "TP1       : prix USD\n"
+        "TP2       : prix USD\n"
+        "Stop Loss : prix USD\n\n"
         "SITUATION ACTUELLE :\n"
-        "2-3 phrases sur ce qui se passe vraiment\n\n"
+        "3 phrases sur ce qui se passe vraiment\n\n"
         "ACTUALITES IMPORTANTES :\n"
         "- actu 1 en francais\n"
         "- actu 2 en francais\n"
         "- actu 3 en francais\n\n"
-        "RISQUES A SURVEILLER :\n"
+        "RISQUES :\n"
         "- risque 1\n"
         "- risque 2\n\n"
         "SENTIMENT GLOBAL : [Haussier / Baissier / Neutre]\n"
     )
 
 
-def analyser_avec_gemini(prompt):
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800},
-    }
-    for tentative in range(MAX_RETRY):
-        try:
-            print("Gemini tentative " + str(tentative + 1))
-            r = requests.post(url, json=body, timeout=30)
-            data = r.json()
-            candidates = data.get("candidates", [])
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts and parts[0].get("text", ""):
-                    return parts[0].get("text", "").strip()
-            print("Gemini reponse invalide: " + str(data)[:150])
-            time.sleep(RETRY_DELAY)
-        except Exception as e:
-            print("Erreur Gemini tentative " + str(tentative + 1) + ": " + str(e))
-            time.sleep(RETRY_DELAY)
-    return None
+def extraire_position_du_conseil(analyse, prix_actuel):
+    lines = analyse.lower().split("\n")
+    direction = None
+    tp1 = tp2 = sl = 0
+
+    for line in lines:
+        if "conseil :" in line:
+            if "long" in line:
+                direction = "LONG"
+            elif "short" in line:
+                direction = "SHORT"
+        if "entre a" in line or "entree" in line:
+            parts = line.replace(",", ".").split()
+            for p in parts:
+                try:
+                    val = float(p.replace("$", "").replace("usd", "").strip())
+                    if val > 1000:
+                        pass
+                except:
+                    pass
+        if "tp1" in line:
+            parts = line.replace(",", ".").split()
+            for p in parts:
+                try:
+                    val = float(p.replace("$", "").replace("usd", "").strip())
+                    if val > 1000:
+                        tp1 = val
+                        break
+                except:
+                    pass
+        if "tp2" in line:
+            parts = line.replace(",", ".").split()
+            for p in parts:
+                try:
+                    val = float(p.replace("$", "").replace("usd", "").strip())
+                    if val > 1000:
+                        tp2 = val
+                        break
+                except:
+                    pass
+        if "stop loss" in line or "stop-loss" in line or "sl" in line:
+            parts = line.replace(",", ".").split()
+            for p in parts:
+                try:
+                    val = float(p.replace("$", "").replace("usd", "").strip())
+                    if val > 1000:
+                        sl = val
+                        break
+                except:
+                    pass
+
+    return direction, tp1, tp2, sl
 
 
 def analyser_avec_cohere(prompt):
@@ -507,7 +784,7 @@ def analyser_avec_cohere(prompt):
         "model": "command-a-03-2025",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
-        "max_tokens": 800,
+        "max_tokens": 900,
     }
     for tentative in range(MAX_RETRY):
         try:
@@ -539,7 +816,7 @@ def analyser_avec_openrouter(prompt):
         "model": "mistralai/mistral-7b-instruct:free",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
-        "max_tokens": 800,
+        "max_tokens": 900,
     }
     for tentative in range(MAX_RETRY):
         try:
@@ -559,14 +836,9 @@ def analyser_avec_openrouter(prompt):
     return None
 
 
-def analyser_ia(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte):
-    prompt = construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte)
-    print("Essai Gemini...")
-    analyse = analyser_avec_gemini(prompt)
-    if analyse:
-        print("Gemini OK")
-        return analyse, "Gemini"
-    print("Gemini echoue, essai Cohere...")
+def analyser_ia(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info):
+    prompt = construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info)
+    print("Essai Cohere...")
     analyse = analyser_avec_cohere(prompt)
     if analyse:
         print("Cohere OK")
@@ -590,12 +862,11 @@ def label_analyse(contexte, heure_paris):
     return labels.get(contexte, "ANALYSE BTC - " + heure_paris)
 
 
-def format_message(actuel, fear_greed, reddit, trends, heure_paris, contexte, analyse, ia_utilisee):
+def format_message(actuel, fear_greed, reddit, trends, heure_paris, contexte, analyse, ia_utilisee, wallet_info):
     s24 = "+" if actuel["var_24h"] >= 0 else ""
-    s7 = "+" if actuel["var_7d"] >= 0 else ""
     fg_line = ""
     if fear_greed:
-        val = int(fear_greed["valeur"])
+        val = int(str(fear_greed["valeur"]))
         if val <= 25:
             fg_emoji = "😱"
         elif val <= 45:
@@ -606,7 +877,7 @@ def format_message(actuel, fear_greed, reddit, trends, heure_paris, contexte, an
             fg_emoji = "😊"
         else:
             fg_emoji = "🤑"
-        fg_line = fg_emoji + " Fear&Greed : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
+        fg_line = fg_emoji + " Fear&Greed : " + str(fear_greed["valeur"]) + "/100\n"
     reddit_line = ""
     if reddit:
         if "haussier" in reddit["sentiment"].lower():
@@ -619,17 +890,21 @@ def format_message(actuel, fear_greed, reddit, trends, heure_paris, contexte, an
     trends_line = ""
     if trends and trends.get("btc_trending"):
         trends_line = "🔥 Google : Bitcoin en tendance\n"
+    wallet_line = ""
+    if wallet_info:
+        wallet_line = "👛 Wallet : " + str(wallet_info["sol"]) + " SOL (" + str(wallet_info["valeur_usd"]) + " USD)\n"
+    pos_line = ""
+    if position_en_cours:
+        pos_line = "📍 Position : " + position_en_cours["direction"] + " @ " + str(position_en_cours["prix_entree"]) + " USD\n"
     prix_emoji = "📈" if actuel["var_24h"] >= 0 else "📉"
     return (
         "╔══════════════════════════╗\n"
         "  " + label_analyse(contexte, heure_paris) + "\n"
         "╚══════════════════════════╝\n"
         "\n"
-        "💰 " + str(actuel["prix"]) + " USD\n"
+        "💰 BTC : " + str(actuel["prix"]) + " USD\n"
         "" + prix_emoji + " 24H : " + s24 + str(actuel["var_24h"]) + "%\n"
-        "" + fg_line
-        + reddit_line
-        + trends_line
+        + fg_line + reddit_line + trends_line + wallet_line + pos_line
         + "🤖 IA : " + ia_utilisee + "\n"
         "\n"
         "─────────────────────────\n"
@@ -652,6 +927,7 @@ def collecter_donnees():
         "news": get_news_btc(),
         "reddit": get_reddit_sentiment(),
         "trends": get_google_trends(),
+        "wallet_info": get_wallet_info(),
     }
 
 
@@ -667,19 +943,26 @@ def lancer_analyse(contexte, heure_paris):
         return False
     analyse, ia = analyser_ia(
         d["resume_prix"], d["fear_greed"], d["donnees_avancees"],
-        d["news"], d["reddit"], d["trends"], heure_paris, contexte
+        d["news"], d["reddit"], d["trends"], heure_paris, contexte,
+        d["wallet_info"]
     )
     if analyse is None:
         send_telegram(
             "⚠️ ERREUR IA - " + heure_paris + "\n"
             "Prix BTC : " + str(d["actuel"]["prix"]) + " USD\n"
-            "Les 3 IA sont indisponibles.\n"
+            "Les IA sont indisponibles.\n"
             "Prochaine analyse prevue."
         )
         return False
+
+    if not position_en_cours:
+        direction, tp1, tp2, sl = extraire_position_du_conseil(analyse, d["actuel"]["prix"])
+        if direction and sl > 0:
+            enregistrer_position(direction, d["actuel"]["prix"], tp1, tp2, sl)
+
     msg = format_message(
         d["actuel"], d["fear_greed"], d["reddit"], d["trends"],
-        heure_paris, contexte, analyse, ia
+        heure_paris, contexte, analyse, ia, d["wallet_info"]
     )
     send_telegram(msg)
     print("Analyse " + contexte + " envoyee via " + ia)
@@ -687,26 +970,26 @@ def lancer_analyse(contexte, heure_paris):
 
 
 def run():
-    print("Bot BTC V6 demarre")
+    global journal_trades
+    print("Bot BTC V7 demarre")
     send_telegram(
-        "🚀 BOT BTC INTELLIGENT V6\n"
+        "🚀 BOT BTC INTELLIGENT V7\n"
         "\n"
-        "🤖 IA 1 : Google Gemini\n"
-        "🤖 IA 2 : Cohere command-a\n"
-        "🤖 IA 3 : OpenRouter Mistral\n"
+        "🤖 IA 1 : Cohere command-a\n"
+        "🤖 IA 2 : OpenRouter Mistral\n"
+        "💰 Prix : Binance + CoinGecko\n"
+        "👛 Wallet : Phantom surveille\n"
         "\n"
-        "📊 Sources : Prix Binance\n"
-        "   Fear&Greed, News x3\n"
-        "   Reddit, Google Trends\n"
-        "\n"
-        "🗣️ IA proactive avec plan d action\n"
-        "⛅ Meteo du marche\n"
-        "🎯 Prix d entree TP et SL\n"
-        "📊 Score de risque\n"
+        "✅ Nouvelles fonctions :\n"
+        "- IA coherente (1 position a la fois)\n"
+        "- Suivi TP et SL automatique\n"
+        "- Reporting performances soir\n"
+        "- Analyse news J et J-1\n"
+        "- Portefeuille Phantom suivi\n"
         "\n"
         "⏰ Analyses : 8h / 13h / 20h\n"
+        "📊 Reporting : 20h chaque soir\n"
         "🔔 Alertes : Mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
-        "   + News importantes\n"
         "⏸️ Pause weekend : OUI\n"
         "\n"
         "Demarrage dans 1 minute..."
@@ -716,12 +999,16 @@ def run():
     dernier_prix = None
     dernier_check = 0
     news_vues = set()
+    reporting_fait = False
+    last_reporting_day = -1
     time.sleep(60)
+
     while True:
         now = datetime.utcnow()
         heure_paris_int = now.hour + 2
         heure_paris = str(heure_paris_int) + "h" + now.strftime("%M")
         cle_jour = str(now.date())
+
         if PAUSE_WEEKEND and is_weekend():
             if not weekend_notified:
                 send_telegram(
@@ -730,14 +1017,17 @@ def run():
                 )
                 weekend_notified = True
                 analyses_faites = set()
+                journal_trades = []
             time.sleep(3600)
             continue
         else:
             weekend_notified = False
+
         if is_heure_creuse():
             print("[" + now.strftime("%H:%M") + " UTC] Heure creuse")
             time.sleep(600)
             continue
+
         if heure_paris_int == 8 and cle_jour + "_matin" not in analyses_faites:
             ok = lancer_analyse("matin", heure_paris)
             if ok:
@@ -745,6 +1035,7 @@ def run():
             else:
                 time.sleep(1800)
             time.sleep(30)
+
         elif heure_paris_int == 13 and cle_jour + "_midi" not in analyses_faites:
             ok = lancer_analyse("midi", heure_paris)
             if ok:
@@ -752,6 +1043,7 @@ def run():
             else:
                 time.sleep(1800)
             time.sleep(30)
+
         elif heure_paris_int == 20 and cle_jour + "_soir" not in analyses_faites:
             ok = lancer_analyse("soir", heure_paris)
             if ok:
@@ -759,11 +1051,22 @@ def run():
             else:
                 time.sleep(1800)
             time.sleep(30)
+
+        if heure_paris_int == 20 and now.day != last_reporting_day:
+            time.sleep(60)
+            send_telegram(reporting_soir())
+            last_reporting_day = now.day
+            journal_trades = []
+
         if time.time() - dernier_check >= 600:
             dernier_check = time.time()
             print("[" + now.strftime("%H:%M") + " UTC] Check alertes...")
             actuel = get_prix_actuel()
             if actuel:
+                alerte_tp_sl = verifier_tp_sl(actuel["prix"])
+                if alerte_tp_sl:
+                    send_telegram(alerte_tp_sl)
+
                 if dernier_prix is not None:
                     var = round((actuel["prix"] - dernier_prix) / dernier_prix * 100, 2)
                     if abs(var) >= SEUIL_MOUVEMENT:
@@ -781,6 +1084,7 @@ def run():
                         time.sleep(5)
                         lancer_analyse("alerte_mouvement", heure_paris)
                 dernier_prix = actuel["prix"]
+
             news = get_news_btc()
             urgente, titre_urgent = detecter_news_urgente(news)
             if urgente and titre_urgent and titre_urgent not in news_vues:
@@ -796,6 +1100,7 @@ def run():
                 )
                 time.sleep(5)
                 lancer_analyse("alerte_news", heure_paris)
+
         time.sleep(60)
 
 
