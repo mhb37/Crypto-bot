@@ -392,19 +392,52 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
     else:
         nw = "Aucune news disponible."
     if contexte == "matin":
-        instruction = "Analyse du MATIN. Resume la nuit, vision de la journee, opportunites et risques."
+        instruction = (
+            "C est l analyse du MATIN. Tu dois etre PROACTIF et DIRECT.\n"
+            "1. Donne la METEO DU MARCHE pour aujourd hui\n"
+            "2. Donne un SCORE DE RISQUE de 1 a 10\n"
+            "3. Dis quel pourcentage du capital deployer aujourd hui\n"
+            "4. Donne un PLAN D ACTION concret pour la journee\n"
+            "5. Si tu conseilles LONG ou SHORT, donne les prix EXACTS d entree, TP et SL"
+        )
     elif contexte == "midi":
-        instruction = "POINT DU MIDI. Bilan matinee, confirme ou infirme la tendance du matin, direction apres-midi."
+        instruction = (
+            "C est le POINT DU MIDI. Sois PROACTIF.\n"
+            "1. La tendance du matin se confirme-t-elle ?\n"
+            "2. Faut-il ajuster les positions ouvertes ?\n"
+            "3. Donne un plan d action precis pour l apres-midi\n"
+            "4. Y a-t-il de nouvelles opportunites a saisir ?"
+        )
     elif contexte == "soir":
-        instruction = "BILAN DU SOIR. Resume la journee complete, evenements marquants, vision pour demain."
+        instruction = (
+            "C est le BILAN DU SOIR. Sois PROACTIF.\n"
+            "1. Bilan complet de la journee\n"
+            "2. Faut-il garder les positions ou les fermer pour la nuit ?\n"
+            "3. Que surveiller cette nuit ?\n"
+            "4. Preparation pour demain matin"
+        )
     elif contexte == "alerte_mouvement":
-        instruction = "ALERTE URGENTE mouvement important detecte. Analyser la nature, opportunite ou danger, que faire maintenant."
+        instruction = (
+            "ALERTE URGENTE mouvement detecte. Sois IMMEDIAT et DECISIF.\n"
+            "1. Ce mouvement est-il une opportunite ou un danger ?\n"
+            "2. Faut-il agir MAINTENANT ?\n"
+            "3. Si oui, donne les prix EXACTS d entree, TP et SL\n"
+            "4. Quel est le risque si on n agit pas ?"
+        )
     elif contexte == "alerte_news":
-        instruction = "ALERTE URGENTE news importante. Impact sur BTC, positif ou negatif, reaction du marche probable."
+        instruction = (
+            "ALERTE URGENTE news importante. Sois IMMEDIAT et DECISIF.\n"
+            "1. Impact direct de cette news sur le prix de BTC\n"
+            "2. Le marche va-t-il monter ou baisser ?\n"
+            "3. Que faire dans les 30 prochaines minutes ?\n"
+            "4. Cette news change-t-elle la tendance du jour ?"
+        )
     else:
-        instruction = "Analyse complete de la situation actuelle de BTC."
+        instruction = "Analyse complete et proactive de BTC."
+
     return (
-        "Tu es un expert analyste Bitcoin. Reponds UNIQUEMENT en francais.\n"
+        "Tu es un trader Bitcoin expert et PROACTIF. Tu reponds UNIQUEMENT en francais.\n"
+        "Tu ne te contentes pas d analyser, tu PRENDS DES DECISIONS et tu DONNES DES ORDRES CLAIRS.\n"
         "Nous sommes le " + date_str + " a " + heure_paris + " heure de Paris.\n\n"
         + instruction + "\n\n"
         "=== PRIX BTC ===\n" + resume_prix + "\n"
@@ -413,27 +446,31 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
         "=== SENTIMENT REDDIT ===\n" + rd + "\n\n"
         "=== GOOGLE TRENDS ===\n" + tr + "\n\n"
         "=== ACTUALITES (traduis en francais) ===\n" + nw + "\n"
-        "Reponds UNIQUEMENT en francais dans ce format exact :\n\n"
-        "CONSEIL : LONG ou SHORT ou ATTENDRE\n"
-        "CONFIANCE : Faible ou Moyenne ou Forte\n\n"
-        "RESUME DE LA SITUATION :\n"
-        "3 phrases en francais sur la situation actuelle\n\n"
-        "ACTUALITES DU MOMENT :\n"
-        "- actualite 1 en francais\n"
-        "- actualite 2 en francais\n"
-        "- actualite 3 en francais\n\n"
-        "RAISONS DU CONSEIL :\n"
-        "- raison 1\n"
-        "- raison 2\n"
-        "- raison 3\n\n"
+        "Reponds UNIQUEMENT en francais dans ce format EXACT :\n\n"
+        "METEO : [emoji soleil/nuage/orage] [Favorable / Mitige / Dangereux]\n"
+        "SCORE DE RISQUE : [1-10]/10\n"
+        "CAPITAL A DEPLOYER : [pourcentage]% de ton capital\n\n"
+        "CONSEIL : [LONG / SHORT / ATTENDRE]\n"
+        "CONVICTION : [1-10]/10\n\n"
+        "PLAN D ACTION :\n"
+        "- Action 1 precise\n"
+        "- Action 2 precise\n"
+        "- Action 3 precise\n\n"
+        "SI LONG OU SHORT :\n"
+        "Entre a  : prix USD\n"
+        "TP1      : prix USD\n"
+        "TP2      : prix USD\n"
+        "Stop Loss: prix USD\n\n"
+        "SITUATION ACTUELLE :\n"
+        "2-3 phrases sur ce qui se passe vraiment\n\n"
+        "ACTUALITES IMPORTANTES :\n"
+        "- actu 1 en francais\n"
+        "- actu 2 en francais\n"
+        "- actu 3 en francais\n\n"
         "RISQUES A SURVEILLER :\n"
         "- risque 1\n"
         "- risque 2\n\n"
-        "NIVEAUX CLES :\n"
-        "Support    : prix USD\n"
-        "Resistance : prix USD\n"
-        "Objectif   : prix USD\n\n"
-        "SENTIMENT GLOBAL : Haussier ou Baissier ou Neutre\n"
+        "SENTIMENT GLOBAL : [Haussier / Baissier / Neutre]\n"
     )
 
 
@@ -441,7 +478,7 @@ def analyser_avec_gemini(prompt):
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 700},
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800},
     }
     for tentative in range(MAX_RETRY):
         try:
@@ -470,20 +507,20 @@ def analyser_avec_cohere(prompt):
         "model": "command-a-03-2025",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
-        "max_tokens": 700,
+        "max_tokens": 800,
     }
     for tentative in range(MAX_RETRY):
         try:
             print("Cohere tentative " + str(tentative + 1))
             r = requests.post("https://api.cohere.com/v2/chat", headers=headers, json=body, timeout=30)
             data = r.json()
-            print("Cohere reponse: " + str(data)[:100])
             message = data.get("message", {})
             content = message.get("content", [])
             if content and len(content) > 0:
                 text = content[0].get("text", "").strip()
                 if text and len(text) > 10:
                     return text
+            print("Cohere reponse invalide: " + str(data)[:100])
             time.sleep(RETRY_DELAY)
         except Exception as e:
             print("Erreur Cohere tentative " + str(tentative + 1) + ": " + str(e))
@@ -502,19 +539,19 @@ def analyser_avec_openrouter(prompt):
         "model": "mistralai/mistral-7b-instruct:free",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
-        "max_tokens": 700,
+        "max_tokens": 800,
     }
     for tentative in range(MAX_RETRY):
         try:
             print("OpenRouter tentative " + str(tentative + 1))
             r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body, timeout=30)
             data = r.json()
-            print("OpenRouter reponse: " + str(data)[:150])
             choices = data.get("choices", [])
             if choices and len(choices) > 0:
                 content = choices[0].get("message", {}).get("content", "")
                 if content and len(content) > 10:
                     return content.strip()
+            print("OpenRouter reponse invalide: " + str(data)[:150])
             time.sleep(RETRY_DELAY)
         except Exception as e:
             print("Erreur OpenRouter tentative " + str(tentative + 1) + ": " + str(e))
@@ -558,27 +595,47 @@ def format_message(actuel, fear_greed, reddit, trends, heure_paris, contexte, an
     s7 = "+" if actuel["var_7d"] >= 0 else ""
     fg_line = ""
     if fear_greed:
-        fg_line = "Fear&Greed : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
+        val = int(fear_greed["valeur"])
+        if val <= 25:
+            fg_emoji = "😱"
+        elif val <= 45:
+            fg_emoji = "😰"
+        elif val <= 55:
+            fg_emoji = "😐"
+        elif val <= 75:
+            fg_emoji = "😊"
+        else:
+            fg_emoji = "🤑"
+        fg_line = fg_emoji + " Fear&Greed : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ")\n"
     reddit_line = ""
     if reddit:
-        reddit_line = "Reddit     : " + reddit["sentiment"] + "\n"
+        if "haussier" in reddit["sentiment"].lower():
+            rd_emoji = "📈"
+        elif "baissier" in reddit["sentiment"].lower():
+            rd_emoji = "📉"
+        else:
+            rd_emoji = "➡️"
+        reddit_line = rd_emoji + " Reddit : " + reddit["sentiment"] + "\n"
     trends_line = ""
     if trends and trends.get("btc_trending"):
-        trends_line = "Google     : Bitcoin en tendance\n"
+        trends_line = "🔥 Google : Bitcoin en tendance\n"
+    prix_emoji = "📈" if actuel["var_24h"] >= 0 else "📉"
     return (
-        "================================\n"
+        "╔══════════════════════════╗\n"
         "  " + label_analyse(contexte, heure_paris) + "\n"
-        "================================\n"
-        "Prix : " + str(actuel["prix"]) + " USD\n"
-        "24H  : " + s24 + str(actuel["var_24h"]) + "%\n"
-        "7J   : " + s7 + str(actuel["var_7d"]) + "%\n"
-        + fg_line + reddit_line + trends_line
-        + "IA   : " + ia_utilisee + "\n"
-        "--------------------------------\n"
+        "╚══════════════════════════╝\n"
+        "\n"
+        "💰 " + str(actuel["prix"]) + " USD\n"
+        "" + prix_emoji + " 24H : " + s24 + str(actuel["var_24h"]) + "%\n"
+        "" + fg_line
+        + reddit_line
+        + trends_line
+        + "🤖 IA : " + ia_utilisee + "\n"
+        "\n"
+        "─────────────────────────\n"
         + analyse
-        + "\n--------------------------------\n"
-        "Pas un conseil financier\n"
-        "================================"
+        + "\n─────────────────────────\n"
+        "⚠️ Pas un conseil financier\n"
     )
 
 
@@ -603,12 +660,9 @@ def lancer_analyse(contexte, heure_paris):
     d = collecter_donnees()
     if d is None:
         send_telegram(
-            "================================\n"
-            "  ERREUR DONNEES - " + heure_paris + "\n"
-            "================================\n"
+            "⚠️ ERREUR DONNEES - " + heure_paris + "\n"
             "Impossible de recuperer les donnees.\n"
-            "Nouvelle tentative dans 30 min.\n"
-            "================================"
+            "Nouvelle tentative dans 30 min."
         )
         return False
     analyse, ia = analyser_ia(
@@ -617,13 +671,10 @@ def lancer_analyse(contexte, heure_paris):
     )
     if analyse is None:
         send_telegram(
-            "================================\n"
-            "  ERREUR IA - " + heure_paris + "\n"
-            "================================\n"
+            "⚠️ ERREUR IA - " + heure_paris + "\n"
             "Prix BTC : " + str(d["actuel"]["prix"]) + " USD\n"
             "Les 3 IA sont indisponibles.\n"
-            "Prochaine analyse prevue.\n"
-            "================================"
+            "Prochaine analyse prevue."
         )
         return False
     msg = format_message(
@@ -636,23 +687,28 @@ def lancer_analyse(contexte, heure_paris):
 
 
 def run():
-    print("Bot BTC V5 demarre")
+    print("Bot BTC V6 demarre")
     send_telegram(
-        "================================\n"
-        "  BOT BTC INTELLIGENT V5\n"
-        "================================\n"
-        "IA 1    : Google Gemini\n"
-        "IA 2    : Cohere command-a\n"
-        "IA 3    : OpenRouter Mistral\n"
-        "Prix    : Binance + CoinGecko\n"
-        "Sources : Fear&Greed, News x3\n"
-        "          Reddit, Google Trends\n"
-        "Langue  : Francais complet\n"
-        "Analyses: 8h / 13h / 20h Paris\n"
-        "Alertes : Mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
-        "          News importantes\n"
-        "Pause WE: OUI\n"
-        "================================\n"
+        "🚀 BOT BTC INTELLIGENT V6\n"
+        "\n"
+        "🤖 IA 1 : Google Gemini\n"
+        "🤖 IA 2 : Cohere command-a\n"
+        "🤖 IA 3 : OpenRouter Mistral\n"
+        "\n"
+        "📊 Sources : Prix Binance\n"
+        "   Fear&Greed, News x3\n"
+        "   Reddit, Google Trends\n"
+        "\n"
+        "🗣️ IA proactive avec plan d action\n"
+        "⛅ Meteo du marche\n"
+        "🎯 Prix d entree TP et SL\n"
+        "📊 Score de risque\n"
+        "\n"
+        "⏰ Analyses : 8h / 13h / 20h\n"
+        "🔔 Alertes : Mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
+        "   + News importantes\n"
+        "⏸️ Pause weekend : OUI\n"
+        "\n"
         "Demarrage dans 1 minute..."
     )
     weekend_notified = False
@@ -669,11 +725,8 @@ def run():
         if PAUSE_WEEKEND and is_weekend():
             if not weekend_notified:
                 send_telegram(
-                    "================================\n"
-                    "  BOT EN PAUSE - WEEKEND\n"
-                    "================================\n"
-                    "Reprise automatique lundi 7h.\n"
-                    "================================"
+                    "⏸️ BOT EN PAUSE - WEEKEND\n"
+                    "Reprise automatique lundi 7h. 🌙"
                 )
                 weekend_notified = True
                 analyses_faites = set()
@@ -715,17 +768,15 @@ def run():
                     var = round((actuel["prix"] - dernier_prix) / dernier_prix * 100, 2)
                     if abs(var) >= SEUIL_MOUVEMENT:
                         sv = "+" if var >= 0 else ""
-                        direction = "HAUSSE" if var > 0 else "BAISSE"
+                        direction = "HAUSSE 📈" if var > 0 else "BAISSE 📉"
                         send_telegram(
-                            "================================\n"
-                            "  ALERTE MOUVEMENT BTC\n"
-                            "================================\n"
-                            "Prix : " + str(actuel["prix"]) + " USD\n"
-                            "Variation : " + sv + str(var) + "%\n"
-                            "Direction : " + direction + "\n"
-                            "================================\n"
-                            "Analyse en cours...\n"
-                            "================================"
+                            "🚨 ALERTE MOUVEMENT BTC\n"
+                            "\n"
+                            "💰 Prix : " + str(actuel["prix"]) + " USD\n"
+                            "📊 Variation : " + sv + str(var) + "%\n"
+                            "📍 Direction : " + direction + "\n"
+                            "\n"
+                            "🤖 Analyse en cours..."
                         )
                         time.sleep(5)
                         lancer_analyse("alerte_mouvement", heure_paris)
@@ -737,13 +788,11 @@ def run():
                 if len(news_vues) > 50:
                     news_vues.clear()
                 send_telegram(
-                    "================================\n"
-                    "  ALERTE NEWS IMPORTANTE\n"
-                    "================================\n"
-                    "NEWS : " + titre_urgent[:200] + "\n"
-                    "================================\n"
-                    "Analyse en cours...\n"
-                    "================================"
+                    "📰 ALERTE NEWS IMPORTANTE\n"
+                    "\n"
+                    "🔔 " + titre_urgent[:200] + "\n"
+                    "\n"
+                    "🤖 Analyse en cours..."
                 )
                 time.sleep(5)
                 lancer_analyse("alerte_news", heure_paris)
