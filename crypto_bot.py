@@ -4,9 +4,6 @@ import os
 import json
 from datetime import datetime
 
-# ═══════════════════════════════════════════
-#  CONFIG
-# ═══════════════════════════════════════════
 TELEGRAM_TOKEN = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
 COHERE_API_KEY = os.environ.get("COHERE_API_KEY", "")
@@ -18,17 +15,8 @@ LEVIER = 5
 PAUSE_WEEKEND = True
 HEURE_DEBUT = 5
 HEURE_FIN = 21
-SEUIL_MOUVEMENT = 2.5
 MAX_RETRY = 3
 RETRY_DELAY = 20
-
-MOTS_URGENTS = [
-    "etf", "sec", "blackrock", "fidelity", "ban", "banned", "hack", "hacked",
-    "crash", "record", "all-time high", "ath", "bankruptcy", "bankrupt",
-    "arrest", "seized", "regulation", "emergency", "breaking", "urgent",
-    "federal reserve", "fed rate", "interest rate", "inflation", "halving",
-    "liquidation", "whale", "manipulation", "exchange down", "scam", "fraud"
-]
 
 MOTS_POSITIFS_REDDIT = [
     "bullish", "moon", "buy", "long", "pump", "green", "up", "rally",
@@ -40,9 +28,12 @@ MOTS_NEGATIFS_REDDIT = [
     "fear", "panic", "drop", "fall", "resistance", "bubble", "scam"
 ]
 
-# ═══════════════════════════════════════════
-#  ETAT DU BOT
-# ═══════════════════════════════════════════
+MOTS_URGENTS = [
+    "etf", "sec", "blackrock", "ban", "hack", "crash", "record",
+    "bankruptcy", "arrest", "regulation", "emergency", "breaking",
+    "federal reserve", "inflation", "halving", "liquidation", "whale", "scam"
+]
+
 capital = CAPITAL_DEPART
 position = None
 historique_trades = []
@@ -68,195 +59,51 @@ def is_heure_creuse():
     return datetime.utcnow().hour < HEURE_DEBUT or datetime.utcnow().hour >= HEURE_FIN
 
 
-# ═══════════════════════════════════════════
-#  GESTION DES TRADES SIMULES
-# ═══════════════════════════════════════════
-def ouvrir_position(direction, prix, tp1, tp2, sl, raison):
-    global position, capital
-    montant = round(capital * RISQUE_PAR_TRADE, 2)
-    position_totale = round(montant * LEVIER, 2)
-    position = {
-        "direction": direction,
-        "prix_entree": prix,
-        "tp1": tp1,
-        "tp2": tp2,
-        "sl": sl,
-        "montant": montant,
-        "position_totale": position_totale,
-        "tp1_atteint": False,
-        "heure": datetime.utcnow().strftime("%d/%m %H:%M UTC"),
-        "raison": raison,
-    }
-    send_telegram(
-        "🤖 TRADE OUVERT (SIMULATION)\n"
-        "\n"
-        "📍 Direction : " + direction + "\n"
-        "💰 Prix entree : " + str(prix) + " USD\n"
-        "🎯 TP1 : " + str(tp1) + " USD\n"
-        "🎯 TP2 : " + str(tp2) + " USD\n"
-        "🛑 SL  : " + str(sl) + " USD\n"
-        "\n"
-        "💵 Capital risque : " + str(montant) + " USD\n"
-        "📊 Position totale : " + str(position_totale) + " USD (x" + str(LEVIER) + ")\n"
-        "💼 Capital restant : " + str(round(capital, 2)) + " USD\n"
-        "\n"
-        "📝 Raison : " + raison[:200] + "\n"
-        "\n"
-        "⚠️ SIMULATION - Pas de vrai argent"
-    )
-
-
-def fermer_position(prix_sortie, raison_fermeture):
-    global position, capital, historique_trades, lecons_apprises
-    if not position:
-        return
-
-    direction = position["direction"]
-    prix_entree = position["prix_entree"]
-    montant = position["montant"]
-
-    if direction == "LONG":
-        pct = round((prix_sortie - prix_entree) / prix_entree * 100, 2)
-    else:
-        pct = round((prix_entree - prix_sortie) / prix_entree * 100, 2)
-
-    gain_brut = round(montant * LEVIER * pct / 100, 2)
-    capital = round(capital + gain_brut, 2)
-    resultat = "GAGNANT" if gain_brut >= 0 else "PERDANT"
-
-    trade = {
-        "direction": direction,
-        "prix_entree": prix_entree,
-        "prix_sortie": prix_sortie,
-        "pct": pct,
-        "gain_usd": gain_brut,
-        "resultat": resultat,
-        "raison_entree": position.get("raison", ""),
-        "raison_sortie": raison_fermeture,
-        "heure_entree": position["heure"],
-        "heure_sortie": datetime.utcnow().strftime("%d/%m %H:%M UTC"),
-    }
-    historique_trades.append(trade)
-
-    lecon = ""
-    if resultat == "PERDANT":
-        lecon = "Trade " + direction + " perdant de " + str(pct) + "%. Entree a " + str(prix_entree) + ", sortie a " + str(prix_sortie) + ". Raison: " + raison_fermeture
-        lecons_apprises.append(lecon)
-        if len(lecons_apprises) > 10:
-            lecons_apprises.pop(0)
-
-    emoji = "✅" if resultat == "GAGNANT" else "❌"
-    s = "+" if gain_brut >= 0 else ""
-    send_telegram(
-        emoji + " TRADE FERME (SIMULATION)\n"
-        "\n"
-        "📍 Direction : " + direction + "\n"
-        "💰 Entree : " + str(prix_entree) + " USD\n"
-        "💰 Sortie : " + str(prix_sortie) + " USD\n"
-        "📊 Performance : " + s + str(pct) + "%\n"
-        "💵 Gain/Perte : " + s + str(gain_brut) + " USD\n"
-        "\n"
-        "💼 Capital actuel : " + str(capital) + " USD\n"
-        "📈 vs Depart : " + ("+" if capital >= CAPITAL_DEPART else "") + str(round(capital - CAPITAL_DEPART, 2)) + " USD\n"
-        "\n"
-        "📝 Raison : " + raison_fermeture[:150] + "\n"
-        "\n"
-        "⚠️ SIMULATION - Pas de vrai argent"
-    )
-    position = None
-
-
-def verifier_tp_sl(prix_actuel):
-    global position
-    if not position:
-        return
-
-    direction = position["direction"]
-    tp1 = position["tp1"]
-    tp2 = position["tp2"]
-    sl = position["sl"]
-    prix_entree = position["prix_entree"]
-
-    if direction == "LONG":
-        if tp2 > 0 and prix_actuel >= tp2:
-            fermer_position(prix_actuel, "TP2 atteint automatiquement")
-        elif tp1 > 0 and prix_actuel >= tp1 and not position.get("tp1_atteint"):
-            position["tp1_atteint"] = True
-            pct = round((prix_actuel - prix_entree) / prix_entree * 100, 2)
-            gain = round(position["montant"] * LEVIER * pct / 100, 2)
-            send_telegram(
-                "🎯 TP1 ATTEINT (SIMULATION)\n"
-                "\n"
-                "📍 LONG en cours\n"
-                "💰 Entree : " + str(prix_entree) + " USD\n"
-                "💰 Actuel : " + str(prix_actuel) + " USD\n"
-                "📊 Profit : +" + str(pct) + "%\n"
-                "💵 Gain simule : +" + str(gain) + " USD\n"
-                "\n"
-                "Objectif TP2 : " + str(tp2) + " USD\n"
-                "⚠️ SIMULATION"
-            )
-        elif sl > 0 and prix_actuel <= sl:
-            fermer_position(prix_actuel, "Stop Loss declenche automatiquement")
-
-    elif direction == "SHORT":
-        if tp2 > 0 and prix_actuel <= tp2:
-            fermer_position(prix_actuel, "TP2 atteint automatiquement")
-        elif tp1 > 0 and prix_actuel <= tp1 and not position.get("tp1_atteint"):
-            position["tp1_atteint"] = True
-            pct = round((prix_entree - prix_actuel) / prix_entree * 100, 2)
-            gain = round(position["montant"] * LEVIER * pct / 100, 2)
-            send_telegram(
-                "🎯 TP1 ATTEINT (SIMULATION)\n"
-                "\n"
-                "📍 SHORT en cours\n"
-                "💰 Entree : " + str(prix_entree) + " USD\n"
-                "💰 Actuel : " + str(prix_actuel) + " USD\n"
-                "📊 Profit : +" + str(pct) + "%\n"
-                "💵 Gain simule : +" + str(gain) + " USD\n"
-                "\n"
-                "Objectif TP2 : " + str(tp2) + " USD\n"
-                "⚠️ SIMULATION"
-            )
-        elif sl > 0 and prix_actuel >= sl:
-            fermer_position(prix_actuel, "Stop Loss declenche automatiquement")
-
-
-# ═══════════════════════════════════════════
-#  DONNEES MARCHE
-# ═══════════════════════════════════════════
 def get_prix_actuel():
-    try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=10)
-        data = r.json()
-        return {
-            "prix": round(float(data["lastPrice"]), 2),
-            "var_24h": round(float(data["priceChangePercent"]), 2),
-            "high_24h": round(float(data["highPrice"]), 2),
-            "low_24h": round(float(data["lowPrice"]), 2),
-            "volume": round(float(data["volume"]), 2),
-        }
-    except Exception as e:
-        print("Erreur Binance: " + str(e))
+    for tentative in range(MAX_RETRY):
+        try:
+            url = "https://api.coingecko.com/api/v3/simple/price"
+            params = {
+                "ids": "bitcoin",
+                "vs_currencies": "usd",
+                "include_24hr_change": "true",
+                "include_24hr_vol": "true",
+            }
+            time.sleep(3)
+            r = requests.get(url, params=params, timeout=15)
+            data = r.json()
+            btc = data.get("bitcoin", {})
+            if "usd" in btc:
+                return {
+                    "prix": round(btc["usd"], 2),
+                    "var_24h": round(btc.get("usd_24h_change", 0), 2),
+                    "high_24h": 0,
+                    "low_24h": 0,
+                    "volume": round(btc.get("usd_24h_vol", 0), 0),
+                }
+        except Exception as e:
+            print("Erreur prix tentative " + str(tentative + 1) + ": " + str(e))
+            time.sleep(RETRY_DELAY)
     return None
 
 
 def get_historique_btc():
     for tentative in range(MAX_RETRY):
         try:
-            time.sleep(5)
+            time.sleep(8)
             url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
             params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
             r = requests.get(url, params=params, timeout=15)
             data = r.json()
             if "prices" not in data:
+                print("CoinGecko rate limit tentative " + str(tentative + 1))
                 time.sleep(60)
                 continue
             prices = [p[1] for p in data["prices"]]
             volumes = [v[1] for v in data["total_volumes"]]
             return prices, volumes
         except Exception as e:
-            print("Erreur CoinGecko tentative " + str(tentative + 1) + ": " + str(e))
+            print("Erreur historique tentative " + str(tentative + 1) + ": " + str(e))
             time.sleep(RETRY_DELAY)
     return None, None
 
@@ -367,82 +214,194 @@ def preparer_resume_prix(prices, volumes, actuel):
         "Variation 4H  : " + s(var_4h) + str(var_4h) + "%\n"
         "Variation 24H : " + s(var_24h) + str(var_24h) + "%\n"
         "Variation 7J  : " + s(var_7j) + str(var_7j) + "%\n"
-        "Haut 24H : " + str(actuel["high_24h"]) + " USD\n"
-        "Bas 24H  : " + str(actuel["low_24h"]) + " USD\n"
         "Support    : " + str(support) + " USD\n"
         "Resistance : " + str(resistance) + " USD\n"
         "Volume : " + tendance_vol + "\n"
     )
 
 
-# ═══════════════════════════════════════════
-#  DECISION IA
-# ═══════════════════════════════════════════
-def construire_prompt_decision(resume_prix, fear_greed, news, reddit_sentiment, actuel):
+def ouvrir_position(direction, prix, tp1, tp2, sl, raison):
+    global position, capital
+    montant = round(capital * RISQUE_PAR_TRADE, 2)
+    position_totale = round(montant * LEVIER, 2)
+    position = {
+        "direction": direction,
+        "prix_entree": prix,
+        "tp1": tp1,
+        "tp2": tp2,
+        "sl": sl,
+        "montant": montant,
+        "position_totale": position_totale,
+        "tp1_atteint": False,
+        "heure": datetime.utcnow().strftime("%d/%m %H:%M UTC"),
+        "raison": raison,
+    }
+    send_telegram(
+        "🤖 TRADE OUVERT (SIMULATION)\n"
+        "\n"
+        "📍 Direction : " + direction + "\n"
+        "💰 Prix entree : " + str(prix) + " USD\n"
+        "🎯 TP1 : " + str(tp1) + " USD\n"
+        "🎯 TP2 : " + str(tp2) + " USD\n"
+        "🛑 SL  : " + str(sl) + " USD\n"
+        "\n"
+        "💵 Capital risque : " + str(montant) + " USD\n"
+        "📊 Position totale : " + str(position_totale) + " USD (x" + str(LEVIER) + ")\n"
+        "💼 Capital total : " + str(round(capital, 2)) + " USD\n"
+        "\n"
+        "📝 " + raison[:200] + "\n"
+        "\n"
+        "⚠️ SIMULATION - Pas de vrai argent"
+    )
+
+
+def fermer_position(prix_sortie, raison_fermeture):
+    global position, capital, historique_trades, lecons_apprises
+    if not position:
+        return
+    direction = position["direction"]
+    prix_entree = position["prix_entree"]
+    montant = position["montant"]
+    if direction == "LONG":
+        pct = round((prix_sortie - prix_entree) / prix_entree * 100, 2)
+    else:
+        pct = round((prix_entree - prix_sortie) / prix_entree * 100, 2)
+    gain_brut = round(montant * LEVIER * pct / 100, 2)
+    capital = round(capital + gain_brut, 2)
+    resultat = "GAGNANT" if gain_brut >= 0 else "PERDANT"
+    trade = {
+        "direction": direction,
+        "prix_entree": prix_entree,
+        "prix_sortie": prix_sortie,
+        "pct": pct,
+        "gain_usd": gain_brut,
+        "resultat": resultat,
+        "raison_sortie": raison_fermeture,
+        "heure_sortie": datetime.utcnow().strftime("%d/%m %H:%M UTC"),
+    }
+    historique_trades.append(trade)
+    if resultat == "PERDANT":
+        lecon = "Trade " + direction + " perdant " + str(pct) + "%. Entree " + str(prix_entree) + " sortie " + str(prix_sortie) + ". " + raison_fermeture
+        lecons_apprises.append(lecon)
+        if len(lecons_apprises) > 10:
+            lecons_apprises.pop(0)
+    emoji = "✅" if resultat == "GAGNANT" else "❌"
+    s = "+" if gain_brut >= 0 else ""
+    send_telegram(
+        emoji + " TRADE FERME (SIMULATION)\n"
+        "\n"
+        "📍 Direction : " + direction + "\n"
+        "💰 Entree : " + str(prix_entree) + " USD\n"
+        "💰 Sortie : " + str(prix_sortie) + " USD\n"
+        "📊 Performance : " + s + str(pct) + "%\n"
+        "💵 Gain/Perte : " + s + str(gain_brut) + " USD\n"
+        "\n"
+        "💼 Capital actuel : " + str(capital) + " USD\n"
+        "📈 vs Depart : " + ("+" if capital >= CAPITAL_DEPART else "") + str(round(capital - CAPITAL_DEPART, 2)) + " USD\n"
+        "\n"
+        "⚠️ SIMULATION - Pas de vrai argent"
+    )
+    position = None
+
+
+def verifier_tp_sl(prix_actuel):
+    global position
+    if not position:
+        return
+    direction = position["direction"]
+    tp1 = position["tp1"]
+    tp2 = position["tp2"]
+    sl = position["sl"]
+    prix_entree = position["prix_entree"]
+    if direction == "LONG":
+        if tp2 > 0 and prix_actuel >= tp2:
+            fermer_position(prix_actuel, "TP2 atteint")
+        elif tp1 > 0 and prix_actuel >= tp1 and not position.get("tp1_atteint"):
+            position["tp1_atteint"] = True
+            pct = round((prix_actuel - prix_entree) / prix_entree * 100, 2)
+            gain = round(position["montant"] * LEVIER * pct / 100, 2)
+            send_telegram(
+                "🎯 TP1 ATTEINT (SIMULATION)\n"
+                "LONG en cours\n"
+                "Entree : " + str(prix_entree) + " USD\n"
+                "Actuel : " + str(prix_actuel) + " USD\n"
+                "Profit : +" + str(pct) + "% (+" + str(gain) + " USD)\n"
+                "TP2 vise : " + str(tp2) + " USD\n"
+                "⚠️ SIMULATION"
+            )
+        elif sl > 0 and prix_actuel <= sl:
+            fermer_position(prix_actuel, "Stop Loss declenche")
+    elif direction == "SHORT":
+        if tp2 > 0 and prix_actuel <= tp2:
+            fermer_position(prix_actuel, "TP2 atteint")
+        elif tp1 > 0 and prix_actuel <= tp1 and not position.get("tp1_atteint"):
+            position["tp1_atteint"] = True
+            pct = round((prix_entree - prix_actuel) / prix_entree * 100, 2)
+            gain = round(position["montant"] * LEVIER * pct / 100, 2)
+            send_telegram(
+                "🎯 TP1 ATTEINT (SIMULATION)\n"
+                "SHORT en cours\n"
+                "Entree : " + str(prix_entree) + " USD\n"
+                "Actuel : " + str(prix_actuel) + " USD\n"
+                "Profit : +" + str(pct) + "% (+" + str(gain) + " USD)\n"
+                "TP2 vise : " + str(tp2) + " USD\n"
+                "⚠️ SIMULATION"
+            )
+        elif sl > 0 and prix_actuel >= sl:
+            fermer_position(prix_actuel, "Stop Loss declenche")
+
+
+def construire_prompt_decision(resume_prix, fear_greed, news, reddit_sentiment):
     date_str = datetime.utcnow().strftime("%d/%m/%Y %H:%M")
-
-    fg_txt = "Fear and Greed : non disponible"
+    fg_txt = "non disponible"
     if fear_greed:
-        fg_txt = "Fear and Greed : " + str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ") | Hier : " + str(fear_greed["hier"]) + "/100"
-
+        fg_txt = str(fear_greed["valeur"]) + "/100 (" + fear_greed["label"] + ") | Hier : " + str(fear_greed["hier"])
     nw_txt = ""
     for i, titre in enumerate(news[:10]):
         nw_txt = nw_txt + str(i+1) + ". " + titre + "\n"
-
     pos_txt = "Aucune position ouverte."
     if position:
         pos_txt = (
             "POSITION OUVERTE : " + position["direction"] + "\n"
             "Entree : " + str(position["prix_entree"]) + " USD\n"
-            "TP1 : " + str(position["tp1"]) + " | TP2 : " + str(position["tp2"]) + " | SL : " + str(position["sl"]) + "\n"
-            "TP1 atteint : " + str(position["tp1_atteint"]) + "\n"
-            "IMPORTANT : Ne pas ouvrir de nouvelle position !"
+            "TP1=" + str(position["tp1"]) + " TP2=" + str(position["tp2"]) + " SL=" + str(position["sl"]) + "\n"
+            "NE PAS ouvrir de nouvelle position !"
         )
-
     lecons_txt = "Aucune lecon pour l instant."
     if lecons_apprises:
-        lecons_txt = "Lecons des trades precedents :\n"
+        lecons_txt = ""
         for l in lecons_apprises[-5:]:
             lecons_txt = lecons_txt + "- " + l + "\n"
-
-    historique_txt = "Aucun trade ferme pour l instant."
+    historique_txt = "Aucun trade."
     if historique_trades:
         total = len(historique_trades)
         gagnants = len([t for t in historique_trades if t["resultat"] == "GAGNANT"])
         pct_moyen = round(sum(t["pct"] for t in historique_trades) / total, 2)
         historique_txt = (
-            "Trades passes : " + str(total) + "\n"
-            "Taux reussite : " + str(round(gagnants / total * 100, 0)) + "%\n"
-            "Performance moyenne : " + ("+" if pct_moyen >= 0 else "") + str(pct_moyen) + "%\n"
+            str(total) + " trades | Taux reussite : " + str(round(gagnants / total * 100, 0)) + "% | Perf moyenne : " + str(pct_moyen) + "%"
         )
-
     return (
-        "Tu es un bot de trading Bitcoin autonome. Tu reponds UNIQUEMENT en francais.\n"
-        "Tu dois prendre une decision de trading MAINTENANT basee sur toutes les donnees.\n"
-        "Tu geres un portefeuille simule de " + str(round(capital, 2)) + " USD.\n"
-        "Capital de depart : " + str(CAPITAL_DEPART) + " USD.\n"
-        "Levier disponible : x" + str(LEVIER) + ".\n"
-        "Risque par trade : " + str(int(RISQUE_PAR_TRADE * 100)) + "% du capital.\n\n"
-        "Date et heure : " + date_str + " UTC\n\n"
+        "Tu es un bot de trading Bitcoin autonome. Reponds UNIQUEMENT en francais.\n"
+        "Tu geres un portefeuille simule de " + str(round(capital, 2)) + " USD (depart : " + str(CAPITAL_DEPART) + " USD).\n"
+        "Levier : x" + str(LEVIER) + " | Risque par trade : " + str(int(RISQUE_PAR_TRADE * 100)) + "% du capital.\n\n"
+        "Date : " + date_str + " UTC\n\n"
         "=== POSITION EN COURS ===\n" + pos_txt + "\n\n"
-        "=== PERFORMANCES ===\n" + historique_txt + "\n\n"
+        "=== HISTORIQUE ===\n" + historique_txt + "\n\n"
         "=== LECONS APPRISES ===\n" + lecons_txt + "\n\n"
         "=== PRIX BTC ===\n" + resume_prix + "\n"
-        "=== SENTIMENT MARCHE ===\n"
-        + fg_txt + "\n"
-        "Reddit : " + reddit_sentiment + "\n\n"
+        "=== FEAR AND GREED ===\n" + fg_txt + "\n\n"
+        "=== SENTIMENT REDDIT ===\n" + reddit_sentiment + "\n\n"
         "=== ACTUALITES ===\n" + nw_txt + "\n"
-        "Prends une decision IMMEDIATE. Reponds EXACTEMENT dans ce format JSON :\n\n"
+        "Prends une decision IMMEDIATE. Reponds UNIQUEMENT avec ce JSON :\n\n"
         "{\n"
         "  \"decision\": \"LONG\" ou \"SHORT\" ou \"ATTENDRE\" ou \"FERMER\",\n"
         "  \"conviction\": 1 a 10,\n"
-        "  \"tp1\": prix en USD ou 0,\n"
-        "  \"tp2\": prix en USD ou 0,\n"
-        "  \"sl\": prix en USD ou 0,\n"
-        "  \"raison\": \"explication courte en francais\",\n"
-        "  \"score_risque\": 1 a 10\n"
+        "  \"tp1\": prix USD ou 0,\n"
+        "  \"tp2\": prix USD ou 0,\n"
+        "  \"sl\": prix USD ou 0,\n"
+        "  \"raison\": \"explication courte en francais\"\n"
         "}\n\n"
-        "Reponds UNIQUEMENT avec le JSON, rien d autre."
+        "Reponds UNIQUEMENT avec le JSON rien d autre."
     )
 
 
@@ -462,17 +421,15 @@ def appeler_ia_decision(prompt):
             print("Cohere decision tentative " + str(tentative + 1))
             r = requests.post("https://api.cohere.com/v2/chat", headers=headers, json=body, timeout=30)
             data = r.json()
-            message = data.get("message", {})
-            content = message.get("content", [])
+            content = data.get("message", {}).get("content", [])
             if content and len(content) > 0:
                 text = content[0].get("text", "").strip()
                 if text and len(text) > 5:
                     return text
             time.sleep(RETRY_DELAY)
         except Exception as e:
-            print("Erreur Cohere decision: " + str(e))
+            print("Erreur Cohere: " + str(e))
             time.sleep(RETRY_DELAY)
-
     headers2 = {
         "Authorization": "Bearer " + OPENROUTER_API_KEY,
         "Content-Type": "application/json",
@@ -497,7 +454,7 @@ def appeler_ia_decision(prompt):
                     return content.strip()
             time.sleep(RETRY_DELAY)
         except Exception as e:
-            print("Erreur OpenRouter decision: " + str(e))
+            print("Erreur OpenRouter: " + str(e))
             time.sleep(RETRY_DELAY)
     return None
 
@@ -507,9 +464,7 @@ def parser_decision(texte):
         debut = texte.find("{")
         fin = texte.rfind("}") + 1
         if debut >= 0 and fin > debut:
-            json_str = texte[debut:fin]
-            data = json.loads(json_str)
-            return data
+            return json.loads(texte[debut:fin])
     except Exception as e:
         print("Erreur parsing JSON: " + str(e))
         print("Texte recu: " + texte[:200])
@@ -517,71 +472,52 @@ def parser_decision(texte):
 
 
 def prendre_decision():
-    global position, capital
-
     actuel = get_prix_actuel()
     if not actuel:
-        print("Impossible de recuperer le prix")
+        print("Prix indisponible")
         return
-
     verifier_tp_sl(actuel["prix"])
-
     prices, volumes = get_historique_btc()
     if not prices:
-        print("Impossible de recuperer l historique")
+        print("Historique indisponible")
         return
-
     resume_prix = preparer_resume_prix(prices, volumes, actuel)
     fear_greed = get_fear_greed()
     news = get_news_btc()
     reddit = get_reddit_sentiment()
-
-    prompt = construire_prompt_decision(resume_prix, fear_greed, news, reddit, actuel)
+    prompt = construire_prompt_decision(resume_prix, fear_greed, news, reddit)
     texte_ia = appeler_ia_decision(prompt)
-
     if not texte_ia:
-        print("IA indisponible pour la decision")
+        print("IA indisponible")
         return
-
     decision = parser_decision(texte_ia)
     if not decision:
-        print("Impossible de parser la decision IA")
+        print("JSON invalide")
         return
-
     action = decision.get("decision", "ATTENDRE")
     conviction = decision.get("conviction", 0)
     tp1 = decision.get("tp1", 0)
     tp2 = decision.get("tp2", 0)
     sl = decision.get("sl", 0)
     raison = decision.get("raison", "")
-    score_risque = decision.get("score_risque", 5)
-
-    print("Decision IA : " + action + " (conviction=" + str(conviction) + ")")
-
+    print("Decision : " + action + " conviction=" + str(conviction))
     if action == "FERMER" and position:
-        fermer_position(actuel["prix"], "Fermeture sur decision IA : " + raison)
-
+        fermer_position(actuel["prix"], "Fermeture IA : " + raison)
     elif action in ("LONG", "SHORT") and not position:
         if conviction >= 6 and sl > 0:
             ouvrir_position(action, actuel["prix"], tp1, tp2, sl, raison)
         else:
-            print("Conviction trop faible (" + str(conviction) + ") ou SL manquant - pas de trade")
-
+            print("Conviction trop faible ou SL manquant")
     elif action == "ATTENDRE":
-        print("Decision : ATTENDRE - " + raison)
-
+        print("ATTENDRE : " + raison)
     elif action in ("LONG", "SHORT") and position:
-        print("Position deja ouverte - impossible d ouvrir un nouveau trade")
+        print("Position deja ouverte - impossible d ouvrir")
 
 
-# ═══════════════════════════════════════════
-#  REPORTING
-# ═══════════════════════════════════════════
 def envoyer_rapport():
     now = datetime.utcnow().strftime("%d/%m/%Y %H:%M")
     perf_totale = round(capital - CAPITAL_DEPART, 2)
     perf_pct = round((capital - CAPITAL_DEPART) / CAPITAL_DEPART * 100, 2)
-
     msg = (
         "📊 RAPPORT PAPER TRADING\n"
         "─────────────────────────\n"
@@ -592,7 +528,6 @@ def envoyer_rapport():
         "📈 Performance     : " + ("+" if perf_totale >= 0 else "") + str(perf_totale) + " USD (" + ("+" if perf_pct >= 0 else "") + str(perf_pct) + "%)\n"
         "\n"
     )
-
     if position:
         actuel = get_prix_actuel()
         if actuel:
@@ -606,25 +541,20 @@ def envoyer_rapport():
                 "Direction : " + position["direction"] + "\n"
                 "Entree    : " + str(position["prix_entree"]) + " USD\n"
                 "Actuel    : " + str(actuel["prix"]) + " USD\n"
-                "P&L actuel: " + ("+" if pct_actuel >= 0 else "") + str(pct_actuel) + "% (" + ("+" if gain_actuel >= 0 else "") + str(gain_actuel) + " USD)\n"
-                "TP1 : " + str(position["tp1"]) + " | TP2 : " + str(position["tp2"]) + "\n"
-                "SL  : " + str(position["sl"]) + "\n"
-                "\n"
+                "P&L       : " + ("+" if pct_actuel >= 0 else "") + str(pct_actuel) + "% (" + ("+" if gain_actuel >= 0 else "") + str(gain_actuel) + " USD)\n"
+                "TP1=" + str(position["tp1"]) + " TP2=" + str(position["tp2"]) + " SL=" + str(position["sl"]) + "\n\n"
             )
-
     if historique_trades:
         total = len(historique_trades)
         gagnants = [t for t in historique_trades if t["resultat"] == "GAGNANT"]
         perdants = [t for t in historique_trades if t["resultat"] == "PERDANT"]
         pct_moyen = round(sum(t["pct"] for t in historique_trades) / total, 2)
         taux = round(len(gagnants) / total * 100, 0)
-
         msg = msg + (
             "📋 HISTORIQUE (" + str(total) + " trades)\n"
             "✅ Gagnants : " + str(len(gagnants)) + " | ❌ Perdants : " + str(len(perdants)) + "\n"
             "🎯 Taux reussite : " + str(taux) + "%\n"
-            "📊 Perf moyenne  : " + ("+" if pct_moyen >= 0 else "") + str(pct_moyen) + "%\n"
-            "\n"
+            "📊 Perf moyenne  : " + ("+" if pct_moyen >= 0 else "") + str(pct_moyen) + "%\n\n"
             "Derniers trades :\n"
         )
         for t in historique_trades[-5:]:
@@ -633,21 +563,15 @@ def envoyer_rapport():
             msg = msg + emoji + " " + t["direction"] + " " + s + str(t["pct"]) + "% (" + t["heure_sortie"] + ")\n"
     else:
         msg = msg + "Aucun trade ferme pour l instant.\n"
-
     if lecons_apprises:
         msg = msg + "\n🧠 Lecons apprises :\n"
         for l in lecons_apprises[-3:]:
             msg = msg + "- " + l[:100] + "\n"
-
     msg = msg + "\n─────────────────────────\n"
-    msg = msg + "⚠️ SIMULATION - Pas de vrai argent\n"
-    msg = msg + "Mode test 1 semaine avant trading reel"
+    msg = msg + "⚠️ SIMULATION - Pas de vrai argent"
     send_telegram(msg)
 
 
-# ═══════════════════════════════════════════
-#  BOUCLE PRINCIPALE
-# ═══════════════════════════════════════════
 def run():
     print("Bot Paper Trading BTC demarre")
     send_telegram(
@@ -667,53 +591,39 @@ def run():
         "⚠️ SIMULATION - Pas de vrai argent\n"
         "Demarrage dans 1 minute..."
     )
-
     weekend_notified = False
     dernier_check_prix = 0
     derniere_decision = 0
     dernier_rapport = 0
     time.sleep(60)
-
     while True:
         now = datetime.utcnow()
-        heure_paris_int = now.hour + 2
-
         if PAUSE_WEEKEND and is_weekend():
             if not weekend_notified:
-                send_telegram(
-                    "⏸️ PAUSE WEEKEND\n"
-                    "Reprise lundi 7h Paris.\n"
-                    "\n"
-                    "📊 Rapport final de la semaine :\n"
-                )
+                send_telegram("⏸️ PAUSE WEEKEND\nReprise lundi 7h Paris.")
                 envoyer_rapport()
                 weekend_notified = True
             time.sleep(3600)
             continue
         else:
             weekend_notified = False
-
         if is_heure_creuse():
             print("[" + now.strftime("%H:%M") + " UTC] Heure creuse")
             time.sleep(600)
             continue
-
         if time.time() - dernier_check_prix >= 300:
             dernier_check_prix = time.time()
             actuel = get_prix_actuel()
             if actuel and position:
                 verifier_tp_sl(actuel["prix"])
-
         if time.time() - derniere_decision >= 1800:
             derniere_decision = time.time()
             print("[" + now.strftime("%H:%M") + " UTC] Prise de decision IA...")
             prendre_decision()
-
         if time.time() - dernier_rapport >= 21600:
             dernier_rapport = time.time()
             print("[" + now.strftime("%H:%M") + " UTC] Envoi rapport...")
             envoyer_rapport()
-
         time.sleep(60)
 
 
