@@ -2,7 +2,7 @@ import requests
 import time
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 TELEGRAM_TOKEN = "8642155934:AAEuhT2QFcoO3vA81fikn-Hn2-iIR4H4SU0"
 TELEGRAM_CHAT_ID = "6866451502"
@@ -35,7 +35,6 @@ MOTS_NEGATIFS_REDDIT = [
     "fear", "panic", "drop", "fall", "resistance", "bubble", "scam"
 ]
 
-# Journal des trades conseilles
 journal_trades = []
 position_en_cours = None
 
@@ -60,25 +59,6 @@ def is_heure_creuse():
     return h < HEURE_DEBUT or h >= HEURE_FIN
 
 
-def get_solana_balance():
-    try:
-        url = "https://api.mainnet-beta.solana.com"
-        body = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "getBalance",
-            "params": [PHANTOM_WALLET]
-        }
-        r = requests.post(url, json=body, timeout=10)
-        data = r.json()
-        lamports = data.get("result", {}).get("value", 0)
-        sol = round(lamports / 1e9, 4)
-        return sol
-    except Exception as e:
-        print("Erreur Solana balance: " + str(e))
-        return None
-
-
 def get_sol_price():
     try:
         r = requests.get(
@@ -92,16 +72,55 @@ def get_sol_price():
 
 
 def get_wallet_info():
-    sol = get_solana_balance()
-    sol_price = get_sol_price()
-    if sol is not None:
+    try:
+        url = "https://api.mainnet-beta.solana.com"
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getBalance",
+            "params": [PHANTOM_WALLET]
+        }
+        r = requests.post(url, json=body, timeout=10)
+        data = r.json()
+        lamports = data.get("result", {}).get("value", 0)
+        sol = round(lamports / 1e9, 4)
+        sol_price = get_sol_price()
         valeur_usd = round(sol * sol_price, 2)
         return {
             "sol": sol,
-            "sol_price": sol_price,
+            "sol_price": round(sol_price, 2),
             "valeur_usd": valeur_usd,
         }
-    return None
+    except Exception as e:
+        print("Erreur wallet: " + str(e))
+        return None
+
+
+def calculer_position(valeur_usd, score_risque):
+    if score_risque <= 3:
+        pct_capital = 5
+        levier = 2
+    elif score_risque <= 5:
+        pct_capital = 10
+        levier = 3
+    elif score_risque <= 7:
+        pct_capital = 15
+        levier = 5
+    else:
+        pct_capital = 5
+        levier = 2
+
+    montant_usd = round(valeur_usd * pct_capital / 100, 2)
+    position_totale = round(montant_usd * levier, 2)
+    risque_max = round(montant_usd * 0.5, 2)
+
+    return {
+        "pct_capital": pct_capital,
+        "montant_usd": montant_usd,
+        "levier": levier,
+        "position_totale": position_totale,
+        "risque_max": risque_max,
+    }
 
 
 def verifier_tp_sl(prix_actuel):
@@ -115,91 +134,105 @@ def verifier_tp_sl(prix_actuel):
     sl = position_en_cours.get("sl", 0)
     prix_entree = position_en_cours.get("prix_entree", 0)
     heure_entree = position_en_cours.get("heure", "")
+    montant = position_en_cours.get("montant_usd", 0)
+    levier = position_en_cours.get("levier", 1)
 
     message = None
     resultat = None
     pct = 0
 
     if direction == "LONG":
-        if prix_actuel >= tp2 and tp2 > 0:
+        if tp2 > 0 and prix_actuel >= tp2:
             pct = round((prix_actuel - prix_entree) / prix_entree * 100, 2)
+            gain_usd = round(montant * levier * pct / 100, 2)
             resultat = "GAGNANT"
             message = (
                 "🎯 TP2 ATTEINT - LONG GAGNE\n"
                 "\n"
-                "💰 Prix entree : " + str(prix_entree) + " USD\n"
-                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
-                "📈 Gain : +" + str(pct) + "%\n"
-                "⏰ Ouvert a : " + heure_entree + "\n"
+                "💰 Entree    : " + str(prix_entree) + " USD\n"
+                "💰 Sortie    : " + str(prix_actuel) + " USD\n"
+                "📈 Gain      : +" + str(pct) + "%\n"
+                "💵 Gain USD  : +" + str(gain_usd) + " USD\n"
+                "⏰ Ouvert a  : " + heure_entree + "\n"
                 "\n"
-                "Fermer la position et prendre les profits !"
+                "Fermer la position maintenant !"
             )
-        elif prix_actuel >= tp1 and tp1 > 0 and not position_en_cours.get("tp1_atteint"):
+        elif tp1 > 0 and prix_actuel >= tp1 and not position_en_cours.get("tp1_atteint"):
             pct = round((prix_actuel - prix_entree) / prix_entree * 100, 2)
+            gain_usd = round(montant * levier * pct / 100, 2)
             position_en_cours["tp1_atteint"] = True
             message = (
                 "🎯 TP1 ATTEINT - LONG EN PROFIT\n"
                 "\n"
-                "💰 Prix entree : " + str(prix_entree) + " USD\n"
-                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
-                "📈 Profit actuel : +" + str(pct) + "%\n"
+                "💰 Entree    : " + str(prix_entree) + " USD\n"
+                "💰 Actuel    : " + str(prix_actuel) + " USD\n"
+                "📈 Profit    : +" + str(pct) + "%\n"
+                "💵 Profit USD: +" + str(gain_usd) + " USD\n"
                 "\n"
-                "Securiser une partie des profits.\n"
-                "Laisser courir vers TP2 : " + str(tp2) + " USD"
+                "Securiser une partie.\n"
+                "TP2 vise : " + str(tp2) + " USD"
             )
         elif sl > 0 and prix_actuel <= sl:
             pct = round((prix_actuel - prix_entree) / prix_entree * 100, 2)
+            perte_usd = round(montant * levier * abs(pct) / 100, 2)
             resultat = "PERDANT"
             message = (
-                "🛑 STOP LOSS DECLENCHE - LONG PERD\n"
+                "🛑 STOP LOSS DECLENCHE\n"
                 "\n"
-                "💰 Prix entree : " + str(prix_entree) + " USD\n"
-                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
-                "📉 Perte : " + str(pct) + "%\n"
-                "⏰ Ouvert a : " + heure_entree + "\n"
+                "💰 Entree    : " + str(prix_entree) + " USD\n"
+                "💰 Actuel    : " + str(prix_actuel) + " USD\n"
+                "📉 Perte     : " + str(pct) + "%\n"
+                "💵 Perte USD : -" + str(perte_usd) + " USD\n"
+                "⏰ Ouvert a  : " + heure_entree + "\n"
                 "\n"
-                "Fermer la position immediatement !"
+                "Fermer la position maintenant !"
             )
 
     elif direction == "SHORT":
         if tp2 > 0 and prix_actuel <= tp2:
             pct = round((prix_entree - prix_actuel) / prix_entree * 100, 2)
+            gain_usd = round(montant * levier * pct / 100, 2)
             resultat = "GAGNANT"
             message = (
                 "🎯 TP2 ATTEINT - SHORT GAGNE\n"
                 "\n"
-                "💰 Prix entree : " + str(prix_entree) + " USD\n"
-                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
-                "📈 Gain : +" + str(pct) + "%\n"
-                "⏰ Ouvert a : " + heure_entree + "\n"
+                "💰 Entree    : " + str(prix_entree) + " USD\n"
+                "💰 Sortie    : " + str(prix_actuel) + " USD\n"
+                "📈 Gain      : +" + str(pct) + "%\n"
+                "💵 Gain USD  : +" + str(gain_usd) + " USD\n"
+                "⏰ Ouvert a  : " + heure_entree + "\n"
                 "\n"
-                "Fermer la position et prendre les profits !"
+                "Fermer la position maintenant !"
             )
         elif tp1 > 0 and prix_actuel <= tp1 and not position_en_cours.get("tp1_atteint"):
             pct = round((prix_entree - prix_actuel) / prix_entree * 100, 2)
+            gain_usd = round(montant * levier * pct / 100, 2)
             position_en_cours["tp1_atteint"] = True
             message = (
                 "🎯 TP1 ATTEINT - SHORT EN PROFIT\n"
                 "\n"
-                "💰 Prix entree : " + str(prix_entree) + " USD\n"
-                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
-                "📈 Profit actuel : +" + str(pct) + "%\n"
+                "💰 Entree    : " + str(prix_entree) + " USD\n"
+                "💰 Actuel    : " + str(prix_actuel) + " USD\n"
+                "📈 Profit    : +" + str(pct) + "%\n"
+                "💵 Profit USD: +" + str(gain_usd) + " USD\n"
                 "\n"
-                "Securiser une partie des profits.\n"
-                "Laisser courir vers TP2 : " + str(tp2) + " USD"
+                "Securiser une partie.\n"
+                "TP2 vise : " + str(tp2) + " USD"
             )
         elif sl > 0 and prix_actuel >= sl:
             pct = round((prix_entree - prix_actuel) / prix_entree * 100, 2)
+            perte_usd = round(montant * levier * abs(pct) / 100, 2)
             resultat = "PERDANT"
             message = (
-                "🛑 STOP LOSS DECLENCHE - SHORT PERD\n"
+                "🛑 STOP LOSS DECLENCHE\n"
                 "\n"
-                "💰 Prix entree : " + str(prix_entree) + " USD\n"
-                "💰 Prix actuel : " + str(prix_actuel) + " USD\n"
-                "📉 Perte : " + str(pct) + "%\n"
-                "⏰ Ouvert a : " + heure_entree + "\n"
+                "💰 Entree    : " + str(prix_entree) + " USD\n"
+                "💰 Actuel    : " + str(prix_actuel) + " USD\n"
+                "📉 Perte     : " + str(pct) + "%\n"
+                "💵 Perte USD : -" + str(perte_usd) + " USD\n"
+                "⏰ Ouvert a  : " + heure_entree + "\n"
                 "\n"
-                "Fermer la position immediatement !"
+                "Fermer la position maintenant !"
             )
 
     if resultat:
@@ -216,7 +249,7 @@ def verifier_tp_sl(prix_actuel):
     return message
 
 
-def enregistrer_position(direction, prix_entree, tp1, tp2, sl):
+def enregistrer_position(direction, prix_entree, tp1, tp2, sl, montant_usd, levier):
     global position_en_cours
     if direction in ("LONG", "SHORT"):
         position_en_cours = {
@@ -225,6 +258,8 @@ def enregistrer_position(direction, prix_entree, tp1, tp2, sl):
             "tp1": tp1,
             "tp2": tp2,
             "sl": sl,
+            "montant_usd": montant_usd,
+            "levier": levier,
             "tp1_atteint": False,
             "heure": datetime.utcnow().strftime("%d/%m %H:%M UTC"),
         }
@@ -234,10 +269,8 @@ def enregistrer_position(direction, prix_entree, tp1, tp2, sl):
 def reporting_soir():
     global journal_trades
     now = datetime.utcnow().strftime("%d/%m/%Y")
-    msg = (
-        "📊 REPORTING DU SOIR - " + now + "\n"
-        "─────────────────────────\n"
-    )
+    msg = "📊 REPORTING DU SOIR - " + now + "\n"
+    msg = msg + "─────────────────────────\n"
 
     if not journal_trades:
         msg = msg + "Aucun trade ferme aujourd hui.\n"
@@ -246,15 +279,14 @@ def reporting_soir():
         gagnants = [t for t in journal_trades if t["resultat"] == "GAGNANT"]
         perdants = [t for t in journal_trades if t["resultat"] == "PERDANT"]
         pct_moyen = round(sum(t["pct"] for t in journal_trades) / total, 2)
-        taux_reussite = round(len(gagnants) / total * 100, 0)
-
-        msg = msg + "Trades fermes : " + str(total) + "\n"
-        msg = msg + "Gagnants : " + str(len(gagnants)) + " ✅\n"
-        msg = msg + "Perdants : " + str(len(perdants)) + " ❌\n"
-        msg = msg + "Taux de reussite : " + str(taux_reussite) + "%\n"
-        msg = msg + "Gain/Perte moyen : " + ("+" if pct_moyen >= 0 else "") + str(pct_moyen) + "%\n"
-        msg = msg + "\n"
-        msg = msg + "Detail des trades :\n"
+        taux = round(len(gagnants) / total * 100, 0)
+        msg = msg + "Trades fermes   : " + str(total) + "\n"
+        msg = msg + "Gagnants        : " + str(len(gagnants)) + " ✅\n"
+        msg = msg + "Perdants        : " + str(len(perdants)) + " ❌\n"
+        msg = msg + "Taux de reussite: " + str(taux) + "%\n"
+        s = "+" if pct_moyen >= 0 else ""
+        msg = msg + "Perf moyenne    : " + s + str(pct_moyen) + "%\n"
+        msg = msg + "\nDetail :\n"
         for t in journal_trades:
             emoji = "✅" if t["resultat"] == "GAGNANT" else "❌"
             s = "+" if t["pct"] >= 0 else ""
@@ -262,10 +294,10 @@ def reporting_soir():
 
     if position_en_cours:
         msg = msg + (
-            "\n"
-            "Position en cours :\n"
-            "📍 " + position_en_cours["direction"] + " ouvert a " + str(position_en_cours["prix_entree"]) + " USD\n"
+            "\nPosition ouverte :\n"
+            "📍 " + position_en_cours["direction"] + " @ " + str(position_en_cours["prix_entree"]) + " USD\n"
             "Depuis : " + position_en_cours["heure"] + "\n"
+            "Montant : " + str(position_en_cours["montant_usd"]) + " USD x" + str(position_en_cours["levier"]) + "\n"
         )
 
     msg = msg + "─────────────────────────\n"
@@ -302,7 +334,6 @@ def get_prix_actuel():
             "prix": round(float(data["lastPrice"]), 2),
             "var_24h": round(float(data["priceChangePercent"]), 2),
             "var_7d": 0,
-            "market_cap": 0,
         }
     except Exception as e:
         print("Erreur Binance: " + str(e))
@@ -314,7 +345,6 @@ def get_prix_actuel():
                 "vs_currencies": "usd",
                 "include_24hr_change": "true",
                 "include_7d_change": "true",
-                "include_market_cap": "true",
             }
             r = requests.get(url, params=params, timeout=10)
             data = r.json()["bitcoin"]
@@ -322,7 +352,6 @@ def get_prix_actuel():
                 "prix": round(data["usd"], 2),
                 "var_24h": round(data.get("usd_24h_change", 0), 2),
                 "var_7d": round(data.get("usd_7d_change", 0), 2),
-                "market_cap": round(data.get("usd_market_cap", 0) / 1e9, 1),
             }
         except Exception as e:
             print("Erreur CoinGecko prix tentative " + str(tentative + 1) + ": " + str(e))
@@ -345,12 +374,10 @@ def get_donnees_avancees():
             r = requests.get(url, params=params, timeout=15)
             data = r.json()
             md = data.get("market_data", {})
-            cd = data.get("community_data", {})
             return {
                 "ath": round(md.get("ath", {}).get("usd", 0), 0),
                 "ath_pct": round(md.get("ath_change_percentage", {}).get("usd", 0), 1),
                 "sentiment_up": data.get("sentiment_votes_up_percentage", 0),
-                "reddit_subscribers": cd.get("reddit_subscribers", 0),
             }
         except Exception as e:
             print("Erreur donnees avancees tentative " + str(tentative + 1) + ": " + str(e))
@@ -456,10 +483,7 @@ def get_reddit_sentiment():
                 sentiment = "Neutre"
             return {
                 "sentiment": sentiment,
-                "score_pos": score_pos,
-                "score_neg": score_neg,
                 "top_posts": titres_reddit[:3],
-                "total_posts": len(posts),
             }
         except Exception as e:
             print("Erreur Reddit tentative " + str(tentative + 1) + ": " + str(e))
@@ -571,7 +595,7 @@ def preparer_resume_prix(prices, volumes, actuel):
     )
 
 
-def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info):
+def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info, calc_pos):
     date_str = datetime.utcnow().strftime("%d/%m/%Y")
 
     if fear_greed:
@@ -617,19 +641,29 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
         pos_info = (
             "POSITION EN COURS : " + position_en_cours["direction"] + "\n"
             "Prix d entree : " + str(position_en_cours["prix_entree"]) + " USD\n"
+            "Montant investi : " + str(position_en_cours["montant_usd"]) + " USD\n"
+            "Levier : x" + str(position_en_cours["levier"]) + "\n"
             "TP1 : " + str(position_en_cours["tp1"]) + " USD\n"
             "TP2 : " + str(position_en_cours["tp2"]) + " USD\n"
             "SL  : " + str(position_en_cours["sl"]) + " USD\n"
             "Ouverte a : " + position_en_cours["heure"] + "\n"
-            "IMPORTANT : Ne pas ouvrir une nouvelle position tant que celle-ci est active !"
+            "IMPORTANT : Ne pas ouvrir une nouvelle position !"
         )
 
     wallet_txt = "Portefeuille non disponible"
     if wallet_info:
         wallet_txt = (
-            "Solana (SOL) : " + str(wallet_info["sol"]) + " SOL\n"
-            "Prix SOL     : " + str(wallet_info["sol_price"]) + " USD\n"
-            "Valeur USD   : " + str(wallet_info["valeur_usd"]) + " USD\n"
+            "Solde total : " + str(wallet_info["valeur_usd"]) + " USD\n"
+            "Composition : " + str(wallet_info["sol"]) + " SOL @ " + str(wallet_info["sol_price"]) + " USD\n"
+        )
+
+    calc_txt = ""
+    if calc_pos:
+        calc_txt = (
+            "Capital recommande a deployer : " + str(calc_pos["pct_capital"]) + "% = " + str(calc_pos["montant_usd"]) + " USD\n"
+            "Levier recommande : x" + str(calc_pos["levier"]) + "\n"
+            "Taille totale de position : " + str(calc_pos["position_totale"]) + " USD\n"
+            "Risque maximum acceptable : " + str(calc_pos["risque_max"]) + " USD\n"
         )
 
     if contexte == "matin":
@@ -638,10 +672,10 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
             "Analyse les news du jour ET d hier avant de decider.\n"
             "1. Donne la METEO DU MARCHE\n"
             "2. Donne un SCORE DE RISQUE de 1 a 10\n"
-            "3. Dis quel pourcentage du capital deployer\n"
+            "3. Utilise le budget du portefeuille pour calculer la position exacte en USD\n"
             "4. Si position en cours, faut-il la garder ou la fermer ?\n"
             "5. Si pas de position, y a-t-il une opportunite claire ?\n"
-            "6. Donne un plan d action PRECIS pour la journee"
+            "6. Donne un plan d action PRECIS avec montants en USD"
         )
     elif contexte == "midi":
         instruction = (
@@ -657,7 +691,7 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
             "1. Bilan complet de la journee\n"
             "2. La position en cours : garder pour la nuit ou fermer ?\n"
             "3. Que surveiller cette nuit ?\n"
-            "4. Preparation pour demain"
+            "4. Preparation pour demain avec budget disponible"
         )
     elif contexte == "alerte_mouvement":
         instruction = (
@@ -665,7 +699,7 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
             "1. Ce mouvement impacte-t-il la position en cours ?\n"
             "2. Faut-il fermer, ajuster le SL ou laisser courir ?\n"
             "3. NE PAS ouvrir une nouvelle position si une est deja ouverte\n"
-            "4. Si pas de position, est-ce le bon moment d entrer ?"
+            "4. Si pas de position, est-ce le bon moment ? Quel montant en USD ?"
         )
     elif contexte == "alerte_news":
         instruction = (
@@ -680,36 +714,42 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
 
     return (
         "Tu es un trader Bitcoin expert et PROACTIF. Tu reponds UNIQUEMENT en francais.\n"
-        "Tu es COHERENT : tu ne proposes jamais une nouvelle position si une est deja ouverte.\n"
+        "Tu parles TOUJOURS en USD, jamais en SOL.\n"
+        "Tu es COHERENT : jamais de nouvelle position si une est deja ouverte.\n"
         "Tu analyses les news du jour ET de la veille avant de decider.\n"
         "Nous sommes le " + date_str + " a " + heure_paris + " heure de Paris.\n\n"
         + instruction + "\n\n"
         "=== POSITION EN COURS ===\n" + pos_info + "\n\n"
-        "=== PORTEFEUILLE PHANTOM ===\n" + wallet_txt + "\n\n"
+        "=== PORTEFEUILLE (en USD) ===\n" + wallet_txt + "\n"
+        + calc_txt + "\n"
         "=== PRIX BTC ===\n" + resume_prix + "\n"
         "=== FEAR AND GREED ===\n" + fg + "\n\n"
         "=== DONNEES MARCHE ===\n" + da + "\n"
         "=== SENTIMENT REDDIT ===\n" + rd + "\n\n"
         "=== GOOGLE TRENDS ===\n" + tr + "\n\n"
-        "=== ACTUALITES DU JOUR ET VEILLE (traduis en francais) ===\n" + nw + "\n"
+        "=== ACTUALITES DU JOUR ET VEILLE ===\n" + nw + "\n"
         "Reponds UNIQUEMENT en francais dans ce format EXACT :\n\n"
         "METEO : [emoji] [Favorable / Mitige / Dangereux]\n"
-        "SCORE DE RISQUE : [1-10]/10\n"
-        "CAPITAL A DEPLOYER : [pourcentage]%\n\n"
+        "SCORE DE RISQUE : [1-10]/10\n\n"
         "POSITION EN COURS : [Garder / Fermer / Ajuster SL] ou [Aucune]\n\n"
-        "CONSEIL : [LONG / SHORT / ATTENDRE / MAINTENIR POSITION]\n"
+        "CONSEIL : [LONG / SHORT / ATTENDRE / MAINTENIR]\n"
         "CONVICTION : [1-10]/10\n\n"
+        "GESTION DU CAPITAL (en USD) :\n"
+        "Budget total    : X USD\n"
+        "Montant a risquer : X USD ([X]% du capital)\n"
+        "Levier recommande : xX\n"
+        "Taille de position: X USD\n\n"
         "PLAN D ACTION :\n"
         "- Action 1\n"
         "- Action 2\n"
         "- Action 3\n\n"
         "SI NOUVELLE ENTREE SEULEMENT :\n"
-        "Entre a   : prix USD\n"
-        "TP1       : prix USD\n"
-        "TP2       : prix USD\n"
-        "Stop Loss : prix USD\n\n"
+        "Entre a   : X USD\n"
+        "TP1       : X USD\n"
+        "TP2       : X USD\n"
+        "Stop Loss : X USD\n\n"
         "SITUATION ACTUELLE :\n"
-        "3 phrases sur ce qui se passe vraiment\n\n"
+        "3 phrases sur ce qui se passe\n\n"
         "ACTUALITES IMPORTANTES :\n"
         "- actu 1 en francais\n"
         "- actu 2 en francais\n"
@@ -721,47 +761,39 @@ def construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, t
     )
 
 
-def extraire_position_du_conseil(analyse, prix_actuel):
+def extraire_position(analyse, prix_actuel):
     lines = analyse.lower().split("\n")
     direction = None
     tp1 = tp2 = sl = 0
-
     for line in lines:
         if "conseil :" in line:
             if "long" in line:
                 direction = "LONG"
             elif "short" in line:
                 direction = "SHORT"
-        if "entre a" in line or "entree" in line:
-            parts = line.replace(",", ".").split()
-            for p in parts:
-                try:
-                    val = float(p.replace("$", "").replace("usd", "").strip())
-                    if val > 1000:
+        for key in ["tp1", "tp 1"]:
+            if key in line:
+                parts = line.replace(",", ".").split()
+                for p in parts:
+                    try:
+                        val = float(p.replace("$", "").replace("usd", "").strip())
+                        if val > 1000:
+                            tp1 = val
+                            break
+                    except:
                         pass
-                except:
-                    pass
-        if "tp1" in line:
-            parts = line.replace(",", ".").split()
-            for p in parts:
-                try:
-                    val = float(p.replace("$", "").replace("usd", "").strip())
-                    if val > 1000:
-                        tp1 = val
-                        break
-                except:
-                    pass
-        if "tp2" in line:
-            parts = line.replace(",", ".").split()
-            for p in parts:
-                try:
-                    val = float(p.replace("$", "").replace("usd", "").strip())
-                    if val > 1000:
-                        tp2 = val
-                        break
-                except:
-                    pass
-        if "stop loss" in line or "stop-loss" in line or "sl" in line:
+        for key in ["tp2", "tp 2"]:
+            if key in line:
+                parts = line.replace(",", ".").split()
+                for p in parts:
+                    try:
+                        val = float(p.replace("$", "").replace("usd", "").strip())
+                        if val > 1000:
+                            tp2 = val
+                            break
+                    except:
+                        pass
+        if "stop loss" in line or "stop-loss" in line:
             parts = line.replace(",", ".").split()
             for p in parts:
                 try:
@@ -771,7 +803,6 @@ def extraire_position_du_conseil(analyse, prix_actuel):
                         break
                 except:
                     pass
-
     return direction, tp1, tp2, sl
 
 
@@ -797,7 +828,7 @@ def analyser_avec_cohere(prompt):
                 text = content[0].get("text", "").strip()
                 if text and len(text) > 10:
                     return text
-            print("Cohere reponse invalide: " + str(data)[:100])
+            print("Cohere invalide: " + str(data)[:100])
             time.sleep(RETRY_DELAY)
         except Exception as e:
             print("Erreur Cohere tentative " + str(tentative + 1) + ": " + str(e))
@@ -828,7 +859,7 @@ def analyser_avec_openrouter(prompt):
                 content = choices[0].get("message", {}).get("content", "")
                 if content and len(content) > 10:
                     return content.strip()
-            print("OpenRouter reponse invalide: " + str(data)[:150])
+            print("OpenRouter invalide: " + str(data)[:150])
             time.sleep(RETRY_DELAY)
         except Exception as e:
             print("Erreur OpenRouter tentative " + str(tentative + 1) + ": " + str(e))
@@ -836,8 +867,8 @@ def analyser_avec_openrouter(prompt):
     return None
 
 
-def analyser_ia(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info):
-    prompt = construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info)
+def analyser_ia(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info, calc_pos):
+    prompt = construire_prompt(resume_prix, fear_greed, donnees_avancees, news, reddit, trends, heure_paris, contexte, wallet_info, calc_pos)
     print("Essai Cohere...")
     analyse = analyser_avec_cohere(prompt)
     if analyse:
@@ -892,7 +923,7 @@ def format_message(actuel, fear_greed, reddit, trends, heure_paris, contexte, an
         trends_line = "🔥 Google : Bitcoin en tendance\n"
     wallet_line = ""
     if wallet_info:
-        wallet_line = "👛 Wallet : " + str(wallet_info["sol"]) + " SOL (" + str(wallet_info["valeur_usd"]) + " USD)\n"
+        wallet_line = "👛 Wallet : " + str(wallet_info["valeur_usd"]) + " USD\n"
     pos_line = ""
     if position_en_cours:
         pos_line = "📍 Position : " + position_en_cours["direction"] + " @ " + str(position_en_cours["prix_entree"]) + " USD\n"
@@ -932,6 +963,7 @@ def collecter_donnees():
 
 
 def lancer_analyse(contexte, heure_paris):
+    global position_en_cours
     print("[" + datetime.utcnow().strftime("%H:%M") + " UTC] Analyse " + contexte + "...")
     d = collecter_donnees()
     if d is None:
@@ -941,10 +973,16 @@ def lancer_analyse(contexte, heure_paris):
             "Nouvelle tentative dans 30 min."
         )
         return False
+
+    calc_pos = None
+    if d["wallet_info"] and not position_en_cours:
+        score_risque = 5
+        calc_pos = calculer_position(d["wallet_info"]["valeur_usd"], score_risque)
+
     analyse, ia = analyser_ia(
         d["resume_prix"], d["fear_greed"], d["donnees_avancees"],
         d["news"], d["reddit"], d["trends"], heure_paris, contexte,
-        d["wallet_info"]
+        d["wallet_info"], calc_pos
     )
     if analyse is None:
         send_telegram(
@@ -956,9 +994,15 @@ def lancer_analyse(contexte, heure_paris):
         return False
 
     if not position_en_cours:
-        direction, tp1, tp2, sl = extraire_position_du_conseil(analyse, d["actuel"]["prix"])
-        if direction and sl > 0:
-            enregistrer_position(direction, d["actuel"]["prix"], tp1, tp2, sl)
+        direction, tp1, tp2, sl = extraire_position(analyse, d["actuel"]["prix"])
+        if direction and sl > 0 and calc_pos:
+            enregistrer_position(
+                direction,
+                d["actuel"]["prix"],
+                tp1, tp2, sl,
+                calc_pos["montant_usd"],
+                calc_pos["levier"]
+            )
 
     msg = format_message(
         d["actuel"], d["fear_greed"], d["reddit"], d["trends"],
@@ -978,18 +1022,19 @@ def run():
         "🤖 IA 1 : Cohere command-a\n"
         "🤖 IA 2 : OpenRouter Mistral\n"
         "💰 Prix : Binance + CoinGecko\n"
-        "👛 Wallet : Phantom surveille\n"
+        "👛 Wallet Phantom surveille\n"
         "\n"
-        "✅ Nouvelles fonctions :\n"
-        "- IA coherente (1 position a la fois)\n"
+        "✅ Fonctions :\n"
+        "- Budget en USD automatique\n"
+        "- Montant et levier calcules\n"
+        "- 1 position a la fois\n"
         "- Suivi TP et SL automatique\n"
-        "- Reporting performances soir\n"
-        "- Analyse news J et J-1\n"
-        "- Portefeuille Phantom suivi\n"
+        "- Reporting performances 20h\n"
+        "- 20 news J et J-1 analysees\n"
         "\n"
         "⏰ Analyses : 8h / 13h / 20h\n"
         "📊 Reporting : 20h chaque soir\n"
-        "🔔 Alertes : Mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
+        "🔔 Alertes mouvements > " + str(SEUIL_MOUVEMENT) + "%\n"
         "⏸️ Pause weekend : OUI\n"
         "\n"
         "Demarrage dans 1 minute..."
@@ -999,7 +1044,6 @@ def run():
     dernier_prix = None
     dernier_check = 0
     news_vues = set()
-    reporting_fait = False
     last_reporting_day = -1
     time.sleep(60)
 
@@ -1053,7 +1097,7 @@ def run():
             time.sleep(30)
 
         if heure_paris_int == 20 and now.day != last_reporting_day:
-            time.sleep(60)
+            time.sleep(90)
             send_telegram(reporting_soir())
             last_reporting_day = now.day
             journal_trades = []
@@ -1066,7 +1110,6 @@ def run():
                 alerte_tp_sl = verifier_tp_sl(actuel["prix"])
                 if alerte_tp_sl:
                     send_telegram(alerte_tp_sl)
-
                 if dernier_prix is not None:
                     var = round((actuel["prix"] - dernier_prix) / dernier_prix * 100, 2)
                     if abs(var) >= SEUIL_MOUVEMENT:
