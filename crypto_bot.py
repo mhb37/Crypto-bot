@@ -62,14 +62,13 @@ def is_heure_creuse():
 def get_prix_actuel():
     for tentative in range(MAX_RETRY):
         try:
+            time.sleep(10)
             url = "https://api.coingecko.com/api/v3/simple/price"
             params = {
                 "ids": "bitcoin",
                 "vs_currencies": "usd",
                 "include_24hr_change": "true",
-                "include_24hr_vol": "true",
             }
-            time.sleep(3)
             r = requests.get(url, params=params, timeout=15)
             data = r.json()
             btc = data.get("bitcoin", {})
@@ -79,12 +78,13 @@ def get_prix_actuel():
                     "var_24h": round(btc.get("usd_24h_change", 0), 2),
                     "high_24h": 0,
                     "low_24h": 0,
-                    "volume": round(btc.get("usd_24h_vol", 0), 0),
+                    "volume": 0,
                 }
         except Exception as e:
             print("Erreur prix tentative " + str(tentative + 1) + ": " + str(e))
-            time.sleep(RETRY_DELAY)
+            time.sleep(60)
     return None
+
 
 
 def get_historique_btc():
@@ -154,8 +154,14 @@ def get_news_btc():
 
 def get_reddit_sentiment():
     try:
-        headers = {"User-Agent": "CryptoBotAnalysis/1.0"}
-        r = requests.get("https://www.reddit.com/r/Bitcoin/hot.json?limit=25", headers=headers, timeout=10)
+        headers = {"User-Agent": "Mozilla/5.0 CryptoBotAnalysis/1.0"}
+        r = requests.get(
+            "https://www.reddit.com/r/Bitcoin/hot.json?limit=25",
+            headers=headers,
+            timeout=15
+        )
+        if r.status_code != 200:
+            return "Neutre"
         data = r.json()
         posts = data.get("data", {}).get("children", [])
         score_pos = 0
@@ -180,7 +186,8 @@ def get_reddit_sentiment():
         return "Neutre"
     except Exception as e:
         print("Erreur Reddit: " + str(e))
-    return "Neutre"
+        return "Neutre"
+
 
 
 def preparer_resume_prix(prices, volumes, actuel):
